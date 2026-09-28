@@ -147,8 +147,24 @@
   $('printInv').addEventListener('click', function () { renderPreview(); window.print(); });
 
   /* ---- dashboard ---- */
+  var AGING_COLORS = { 'current': '#2f6f4f', '1-30 days': '#d97706', '31-60 days': '#c2410c', '60+ days': '#b91c1c' };
   function renderDashboard() {
     var d = L.dashboard(S.invoices);
+    var unpaid = S.invoices.filter(function (i) { return L.statusOf(i) !== 'paid'; });
+    $('heroOutstanding').textContent = L.money(d.outstanding + d.overdue);
+    $('heroSub').textContent = unpaid.length + ' unpaid invoice' + (unpaid.length === 1 ? '' : 's') +
+      ' · ' + L.money(d.overdue) + ' overdue';
+    var keys = ['current', '1-30 days', '31-60 days', '60+ days'];
+    var tot = keys.reduce(function (s, k) { return s + (d.buckets[k] || 0); }, 0);
+    $('agingBar').innerHTML = keys.map(function (k) {
+      var v = d.buckets[k] || 0;
+      if (!v || !tot) return '';
+      var w = Math.max(4, Math.round(v / tot * 100));
+      return '<span style="width:' + w + '%;background:' + AGING_COLORS[k] + '" title="' + k + ': ' + L.money(v) + '"></span>';
+    }).join('');
+    $('agingLegend').innerHTML = keys.map(function (k) {
+      return '<span><span class="dot" style="background:' + AGING_COLORS[k] + '"></span>' + k + ' · <strong>' + L.money(d.buckets[k] || 0) + '</strong></span>';
+    }).join('');
     $('dashCards').innerHTML =
       stat(L.money(d.outstanding), 'Outstanding', '') +
       stat(L.money(d.overdue), 'Overdue', d.overdue > 0 ? 'bad' : '') +
@@ -163,7 +179,7 @@
           '</td><td>' + esc(L.agingBucket(i)) + '</td><td><span class="pill ' + st + '">' + st + '</span></td></tr>';
       }).join('');
     $('agingList').innerHTML = rows ? '<table><tr><th>#</th><th>Client</th><th>Total</th><th>Aging</th><th>Status</th></tr>' + rows + '</table>'
-      : '<p class="muted">Nothing unpaid. 🎉</p>';
+      : '<p class="muted">Nothing unpaid.</p>';
   }
   function stat(v, l, cls) { return '<div class="stat ' + cls + '"><div class="v">' + v + '</div><div class="l">' + l + '</div></div>'; }
 
@@ -184,7 +200,7 @@
     document.querySelectorAll('[data-paid]').forEach(function (b) {
       b.addEventListener('click', function () {
         var inv = S.invoices.find(function (x) { return x.id === b.dataset.paid; });
-        if (inv) { inv.status = 'paid'; save(); renderDashboard(); renderInvoices(); renderReminders(); toast('Marked paid 💰'); }
+        if (inv) { inv.status = 'paid'; save(); renderDashboard(); renderInvoices(); renderReminders(); toast('Marked paid'); }
       });
     });
     document.querySelectorAll('[data-delinv]').forEach(function (b) {
@@ -203,7 +219,7 @@
   function renderReminders() {
     var sel = $('rInv'); sel.innerHTML = '';
     var od = overdueInvs();
-    if (!od.length) { sel.innerHTML = '<option value="">— no overdue invoices 🎉 —</option>'; $('rSubject').textContent = ''; $('rBody').textContent = ''; return; }
+    if (!od.length) { sel.innerHTML = '<option value="">— no overdue invoices —</option>'; $('rSubject').textContent = ''; $('rBody').textContent = ''; return; }
     od.forEach(function (i) {
       var o = document.createElement('option'); o.value = i.id;
       o.textContent = i.number + ' · ' + i.clientName + ' · ' + L.money(L.totals(i).total) + ' · ' + L.daysOverdue(i) + 'd late';
@@ -246,7 +262,7 @@
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: $('rBody').textContent })
     }).then(function (r) { return r.json(); }).then(function (j) {
-      if (j.enhanced) { $('rBody').textContent = j.text; $('polishNote').textContent = '✨ AI-polished'; }
+      if (j.enhanced) { $('rBody').textContent = j.text; $('polishNote').textContent = 'AI-polished'; }
       else $('polishNote').textContent = 'Local draft (no AI key set)';
       setTimeout(function () { $('polishNote').textContent = ''; }, 3000);
     }).catch(function () { $('polishNote').textContent = 'Local draft (offline)'; });
