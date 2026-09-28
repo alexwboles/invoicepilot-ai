@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InvoicePilot AI — Invoices that get paid</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">🧾 InvoicePilot <span class="ai">AI</span></div>
+  <nav id="tabs">
+    <button data-tab="dash" class="active">Dashboard</button>
+    <button data-tab="new">New Invoice</button>
+    <button data-tab="invoices">Invoices</button>
+    <button data-tab="remind">Reminders</button>
+    <button data-tab="clients">Clients</button>
+  </nav>
+</header>
+
+<main>
+  <!-- DASHBOARD -->
+  <section id="tab-dash" class="tab active">
+    <h2>Money at a glance</h2>
+    <div class="cards" id="dashCards"></div>
+    <h3>Aging — unpaid invoices</h3>
+    <div id="agingList"></div>
+  </section>
+
+  <!-- NEW INVOICE -->
+  <section id="tab-new" class="tab">
+    <h2>New invoice <span class="muted" id="invNumberLabel"></span></h2>
+    <div class="grid2">
+      <div class="card">
+        <label>Client
+          <select id="fClient"></select>
+        </label>
+        <div class="row">
+          <label>Issue date <input type="date" id="fIssue"></label>
+          <label>Due date <input type="date" id="fDue"></label>
+        </div>
+        <h3>Line items</h3>
+        <div id="items"></div>
+        <button id="addItem" class="ghost">+ Add line</button>
+        <div class="row">
+          <label>Discount % <input type="number" id="fDisc" value="0" min="0" max="100" step="0.5"></label>
+          <label>Tax % <input type="number" id="fTax" value="0" min="0" max="100" step="0.5"></label>
+        </div>
+        <label>Notes <input id="fNotes" placeholder="e.g. Payment due within 14 days"></label>
+        <div id="formErr" class="err"></div>
+        <div class="row">
+          <button id="saveInv" class="primary">Save invoice</button>
+          <button id="printInv" class="ghost">🖨️ Print / PDF</button>
+        </div>
+      </div>
+      <div class="card invoice-preview" id="preview"></div>
+    </div>
+  </section>
+
+  <!-- INVOICES -->
+  <section id="tab-invoices" class="tab">
+    <h2>Invoices</h2>
+    <div class="row">
+      <select id="invFilter">
+        <option value="all">All</option>
+        <option value="outstanding">Outstanding</option>
+        <option value="overdue">Overdue</option>
+        <option value="paid">Paid</option>
+      </select>
+    </div>
+    <div id="invList"></div>
+  </section>
+
+  <!-- REMINDERS -->
+  <section id="tab-remind" class="tab">
+    <h2>Smart payment reminders</h2>
+    <p class="muted">Pick an overdue invoice — InvoicePilot drafts the nudge in 3 tones. Copy, paste, get paid.</p>
+    <label>Overdue invoice <select id="rInv"></select></label>
+    <div class="row tones">
+      <button data-tone="gentle" class="tone active">😊 Gentle</button>
+      <button data-tone="firm" class="tone">😐 Firm</button>
+      <button data-tone="final" class="tone">⚠️ Final notice</button>
+    </div>
+    <div class="card">
+      <strong id="rSubject"></strong>
+      <pre id="rBody"></pre>
+      <div class="row">
+        <button id="copyDraft" class="primary">Copy draft</button>
+        <button id="polishDraft" class="ghost">✨ Polish with AI</button>
+        <span id="polishNote" class="muted"></span>
+      </div>
+    </div>
+    <h3>Reminder log</h3>
+    <div id="remLog"></div>
+  </section>
+
+  <!-- CLIENTS -->
+  <section id="tab-clients" class="tab">
+    <h2>Clients</h2>
+    <div class="card">
+      <div class="row">
+        <input id="cName" placeholder="Client name">
+        <input id="cEmail" placeholder="Email (optional)">
+        <button id="addClient" class="primary">Add client</button>
+      </div>
+    </div>
+    <div id="clientList"></div>
+    <h2>Settings</h2>
+    <div class="card">
+      <label>Your business name <input id="sBiz" placeholder="e.g. Alex's Plumbing"></label>
+      <button id="saveBiz" class="ghost">Save</button>
+    </div>
+  </section>
+</main>
+
+<div id="toast"></div>
+<script src="/lib/logic.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+{"description":"AI invoicing + smart payment reminders for freelancers and trades","license":"MIT","main":"server.js","name":"invoicepilot-ai","scripts":{"start":"node server.js","test":"bash test/smoke.sh && bash test/e2e.sh"},"version":"1.0.0"}
