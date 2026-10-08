@@ -9,9 +9,12 @@ Freelancers lose thousands to late payments. Not because clients won't pay — b
 ## The solution
 
 - **Invoice builder** — client, line items, discount, tax → live professional preview → Print / Save-as-PDF straight from the browser.
-- **AI dunning drafts** — pick an overdue invoice, get a reminder drafted in 3 tones: 😊 Gentle, 😐 Firm, ⚠️ Final notice. Copy, paste, get paid.
+- **AI dunning drafts** — pick an overdue invoice, get a reminder drafted in 3 tones: 😊 Gentle, 😐 Firm, ⚠️ Final notice. Copy, paste, get paid. Drafts reference the *remaining balance* after partial payments.
+- **Partial payments** — record payments against an invoice; the balance, dashboard, aging, and reminders all follow what's still owed. Paying in full marks it paid automatically.
+- **Duplicate invoice** — one click re-bills a repeat client with a fresh number and today's date.
 - **Dashboard** — outstanding / overdue / collected totals plus an aging list (current, 1–30, 31–60, 60+ days).
-- **Clients + history** — everything stored locally. Reminder log shows what you sent and when.
+- **Ledger** — search invoices by number or client, filter by status, one-click CSV export of the full ledger (totals, paid, balance).
+- **Clients + history** — everything stored locally. Per-client unpaid/overdue totals at a glance. Reminder log shows what you sent and when.
 
 All local-first: your client list and invoices never leave the browser (localStorage). Set `OPENAI_API_KEY` and the "✨ Polish with AI" button upgrades drafts with GPT — fully optional, never required.
 

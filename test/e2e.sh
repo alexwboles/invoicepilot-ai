@@ -69,6 +69,54 @@ if(L.daysOverdue({dueDate:'not-a-date'})!==0) throw new Error('bad date');
 if(L.statusOf({dueDate:'2099-01-01',status:'unpaid'})!=='outstanding') throw new Error('future due');
 " && ok "flow6: money/edge totals" || bad "flow6: money/edge totals"
 
+# Flow 7: partial-payment journey — pay in chunks, dashboard + dunning follow the balance
+node -e "
+const L=require('$D/lib/logic.js');
+let invoices=[];
+const inv={number:L.nextNumber(invoices),clientId:'c1',clientName:'Slow Payer',
+  issueDate:'2026-06-01',dueDate:'2026-06-15',items:[{desc:'Work',qty:1,rate:500}],status:'unpaid'};
+invoices.push(inv);
+let r=L.addPayment(inv,200,'2026-07-01');
+if(!r.ok) throw new Error('payment 1');
+let d=L.dashboard(invoices);
+if(d.overdue!==300) throw new Error('dashboard overdue should be 300, got '+d.overdue);
+const draft=L.dunningDraft(inv,{name:'Slow Payer'},'firm');
+if(!draft.body.includes('\$300.00')) throw new Error('dunning should reference \$300 balance, not \$500');
+r=L.addPayment(inv,300,'2026-07-02');
+if(!r.ok||L.statusOf(inv)!=='paid') throw new Error('final payment should mark paid');
+d=L.dashboard(invoices);
+if(d.paid!==500||d.overdue!==0) throw new Error('dashboard after pay '+JSON.stringify(d));
+" && ok "flow7: partial payments (dashboard + dunning track balance)" || bad "flow7: partial payments"
+
+# Flow 8: duplicate + CSV + client totals round trip
+node -e "
+const L=require('$D/lib/logic.js');
+let invoices=[
+  {number:'INV-0001',clientId:'c1',clientName:'Repeat Client',issueDate:'2026-09-01',dueDate:'2026-09-15',
+   items:[{desc:'Lawn care',qty:4,rate:75}],discountPct:0,taxPct:0,status:'unpaid'},
+];
+const copy=L.cloneInvoice(invoices[0],L.nextNumber(invoices));
+invoices.push(copy);
+if(copy.number!=='INV-0002') throw new Error('numbering');
+L.addPayment(copy,100);
+const csv=L.invoicesToCSV(invoices);
+if(csv.split('\n').length!==3) throw new Error('csv rows');
+const ct=L.clientTotals(invoices);
+if(ct.c1.unpaid!==500||ct.c1.count!==2) throw new Error('client totals '+JSON.stringify(ct.c1));
+" && ok "flow8: duplicate -> partial pay -> CSV -> client totals" || bad "flow8: duplicate flow"
+
+# Flow 9: dunning for partially-paid invoice mentions remaining balance in subject
+node -e "
+const L=require('$D/lib/logic.js');
+const inv={number:'INV-0009',clientName:'Jane',issueDate:'2026-06-01',dueDate:'2026-06-15',
+  items:[{qty:1,rate:1000}],status:'unpaid'};
+L.addPayment(inv,750);
+const g=L.dunningDraft(inv,{name:'Jane'},'gentle');
+if(!g.subject.includes('\$250.00')||!g.body.includes('\$250.00')) throw new Error('should nudge for \$250');
+const f=L.dunningDraft(inv,{name:'Jane'},'final');
+if(!f.body.includes('250')) throw new Error('final missing balance');
+" && ok "flow9: dunning references remaining balance" || bad "flow9: dunning balance"
+
 kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
 echo "--- e2e: $PASS passed, $FAIL failed ---"
 exit $((FAIL>0))

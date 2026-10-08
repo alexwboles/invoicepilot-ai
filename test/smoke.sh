@@ -68,5 +68,71 @@ const bad=L.validate({items:[]});
 if(bad.length<3) throw new Error('validate too lax');
 " && ok "aging/dashboard/validate" || bad "aging/dashboard/validate"
 
+# 11. partial payments: balance shrinks, overpay rejected, full pay marks paid
+node -e "
+const L=require('$D/lib/logic.js');
+const inv={number:'INV-0100',clientName:'C',issueDate:'2026-09-01',dueDate:'2026-10-01',
+  items:[{qty:1,rate:500}],status:'unpaid'};
+if(L.balanceDue(inv)!==500) throw new Error('balance start');
+let r=L.addPayment(inv,200,'2026-09-10');
+if(!r.ok||L.balanceDue(inv)!==300) throw new Error('partial pay');
+if(L.statusOf(inv)==='paid') throw new Error('should not be paid yet');
+const over=L.addPayment(inv,400);
+if(over.ok) throw new Error('overpayment should be rejected: '+JSON.stringify(over));
+const zero=L.addPayment(inv,0);
+if(zero.ok) throw new Error('zero payment should be rejected');
+r=L.addPayment(inv,300);
+if(!r.ok||L.statusOf(inv)!=='paid'||L.balanceDue(inv)!==0) throw new Error('final pay');
+if(inv.payments.length!==2) throw new Error('payment log');
+" && ok "partial payments (balance, overpay/zero rejected, auto-paid)" || bad "partial payments"
+
+# 12. duplicate invoice: new number, fresh dates/status, same line items
+node -e "
+const L=require('$D/lib/logic.js');
+const src={id:'i1',number:'INV-0005',clientId:'c1',clientName:'C',businessName:'B',
+  issueDate:'2026-08-01',dueDate:'2026-08-15',items:[{desc:'Mow',qty:2,rate:50}],
+  discountPct:10,taxPct:0,notes:'Monthly',status:'paid',payments:[{amount:90,date:'2026-08-10'}]};
+const c=L.cloneInvoice(src,'INV-0006');
+if(c.number!=='INV-0006'||c.id===src.id) throw new Error('number/id');
+if(c.status!=='unpaid'||c.payments.length) throw new Error('must be fresh unpaid');
+if(c.items.length!==1||c.items[0].desc!=='Mow'||c.items[0].qty!==2) throw new Error('items');
+if(c.discountPct!==10||c.notes!=='Monthly') throw new Error('carried fields');
+if(L.totals(c).total!==90) throw new Error('total '+L.totals(c).total);
+" && ok "duplicate invoice (fresh, items carried over)" || bad "duplicate invoice"
+
+# 13. CSV export: header + paid/balance columns, quoting
+node -e "
+const L=require('$D/lib/logic.js');
+const invs=[{number:'INV-1',clientName:'Acme, Inc',issueDate:'2026-09-01',dueDate:'2026-09-15',
+  items:[{qty:1,rate:200}],status:'unpaid',payments:[{amount:50,date:'2026-09-02'}]}];
+const csv=L.invoicesToCSV(invs);
+const lines=csv.split('\n');
+if(!/^Number,Client,Issue date/.test(lines[0])) throw new Error('header: '+lines[0]);
+if(!/Paid,Balance$/.test(lines[0])) throw new Error('paid/balance cols');
+if(!/\"Acme, Inc\"/.test(csv)) throw new Error('quoting');
+if(!/,200\.00,50\.00,150\.00$/.test(lines[1])) throw new Error('paid/balance values: '+lines[1]);
+if(L.invoicesToCSV([]).split('\n').length!==1) throw new Error('empty');
+" && ok "invoicesToCSV (header, paid/balance, quoting)" || bad "invoicesToCSV"
+
+# 14. per-client totals aggregate unpaid + overdue by client
+node -e "
+const L=require('$D/lib/logic.js');
+const mk=(n,cid,days,status)=>({number:n,clientId:cid,clientName:'N-'+cid,
+  issueDate:'2020-01-01',dueDate:new Date(Date.now()-days*864e5).toISOString().slice(0,10),
+  items:[{qty:1,rate:100}],status});
+const invs=[mk('A','c1',40,'unpaid'),mk('B','c1',-5,'unpaid'),mk('C','c2',70,'unpaid'),mk('D','c2',10,'paid')];
+const ct=L.clientTotals(invs);
+if(ct.c1.unpaid!==200||ct.c1.overdue!==100||ct.c1.count!==2) throw new Error('c1 '+JSON.stringify(ct.c1));
+if(ct.c2.unpaid!==100||ct.c2.overdue!==100) throw new Error('c2 '+JSON.stringify(ct.c2));
+if(ct.c2.count!==1) throw new Error('paid invoice must not count');
+" && ok "clientTotals (unpaid/overdue per client)" || bad "clientTotals"
+
+# 15. new UI wired: search box, export CSV, payment/duplicate buttons
+grep -q 'id="invSearch"' "$D/public/index.html" && grep -q 'id="exportInvCsv"' "$D/public/index.html" \
+  && ok "index.html has invSearch + exportInvCsv" || bad "index.html missing new controls"
+grep -q 'data-pay' "$D/public/js/app.js" && grep -q 'data-dupe' "$D/public/js/app.js" \
+  && grep -q 'invSearch' "$D/public/js/app.js" && grep -q 'invoicesToCSV' "$D/public/js/app.js" \
+  && ok "app.js wires payments/duplicate/search/CSV" || bad "app.js missing wiring"
+
 echo "--- smoke: $PASS passed, $FAIL failed ---"
 exit $((FAIL>0))

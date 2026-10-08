@@ -39,10 +39,13 @@
     S.clients.forEach(function (c) {
       var o = document.createElement('option'); o.value = c.id; o.textContent = c.name; sel.appendChild(o);
     });
-    var html = '<table><tr><th>Name</th><th>Email</th><th>Invoices</th><th></th></tr>';
+    var ct = L.clientTotals(S.invoices);
+    var html = '<table><tr><th>Name</th><th>Email</th><th>Invoices</th><th>Unpaid</th><th>Overdue</th><th></th></tr>';
     S.clients.forEach(function (c) {
-      var n = S.invoices.filter(function (i) { return i.clientId === c.id; }).length;
-      html += '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.email || '—') + '</td><td>' + n +
+      var invs = S.invoices.filter(function (i) { return i.clientId === c.id; });
+      var g = ct[c.id] || { unpaid: 0, overdue: 0 };
+      html += '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.email || '—') + '</td><td>' + invs.length +
+        '</td><td>' + L.money(g.unpaid) + '</td><td>' + (g.overdue > 0 ? '<strong>' + L.money(g.overdue) + '</strong>' : L.money(0)) +
         '</td><td><button class="ghost" data-delclient="' + c.id + '">Delete</button></td></tr>';
     });
     $('clientList').innerHTML = html + '</table>';
@@ -140,6 +143,7 @@
     var errs = L.validate(inv);
     if (errs.length) { $('formErr').textContent = errs.join(' '); return; }
     inv.id = 'i' + Date.now();
+    inv.payments = [];
     S.invoices.push(inv); save();
     resetForm(); renderDashboard(); renderInvoices(); renderReminders();
     toast('Invoice ' + inv.number + ' saved');
@@ -186,21 +190,51 @@
   /* ---- invoices list ---- */
   function renderInvoices() {
     var f = $('invFilter').value;
+    var q = ($('invSearch').value || '').trim().toLowerCase();
     var rows = S.invoices.slice().reverse()
       .filter(function (i) { return f === 'all' || L.statusOf(i) === f; })
+      .filter(function (i) {
+        if (!q) return true;
+        return ((i.number || '') + ' ' + (i.clientName || '')).toLowerCase().indexOf(q) !== -1;
+      })
       .map(function (i) {
-        var st = L.statusOf(i), t = L.totals(i).total;
+        var st = L.statusOf(i), t = L.totals(i).total, bal = L.balanceDue(i);
         return '<tr><td>' + esc(i.number) + '</td><td>' + esc(i.clientName) + '</td><td>' + esc(i.dueDate) +
-          '</td><td>' + L.money(t) + '</td><td><span class="pill ' + st + '">' + st + '</span></td><td>' +
-          (st === 'paid' ? '' : '<button class="ghost" data-paid="' + i.id + '">Mark paid</button> ') +
+          '</td><td>' + L.money(t) + '</td><td>' + (st === 'paid' ? '—' : L.money(bal)) +
+          '</td><td><span class="pill ' + st + '">' + st + '</span></td><td>' +
+          (st === 'paid' ? '' : '<button class="ghost" data-pay="' + i.id + '">Record payment</button> ' +
+            '<button class="ghost" data-paid="' + i.id + '">Mark paid</button> ') +
+          '<button class="ghost" data-dupe="' + i.id + '">Duplicate</button> ' +
           '<button class="ghost" data-delinv="' + i.id + '">Delete</button></td></tr>';
       }).join('');
-    $('invList').innerHTML = rows ? '<table><tr><th>#</th><th>Client</th><th>Due</th><th>Total</th><th>Status</th><th></th></tr>' + rows + '</table>'
+    $('invList').innerHTML = rows ? '<table><tr><th>#</th><th>Client</th><th>Due</th><th>Total</th><th>Balance</th><th>Status</th><th></th></tr>' + rows + '</table>'
       : '<p class="muted">No invoices here yet.</p>';
     document.querySelectorAll('[data-paid]').forEach(function (b) {
       b.addEventListener('click', function () {
         var inv = S.invoices.find(function (x) { return x.id === b.dataset.paid; });
-        if (inv) { inv.status = 'paid'; save(); renderDashboard(); renderInvoices(); renderReminders(); toast('Marked paid'); }
+        if (inv) { inv.status = 'paid'; save(); renderDashboard(); renderInvoices(); renderReminders(); renderClients(); toast('Marked paid'); }
+      });
+    });
+    document.querySelectorAll('[data-pay]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var inv = S.invoices.find(function (x) { return x.id === b.dataset.pay; });
+        if (!inv) return;
+        var raw = prompt('Record payment for ' + inv.number + ' (' + inv.clientName + ')\nBalance due: ' + L.money(L.balanceDue(inv)), L.balanceDue(inv).toFixed(2));
+        if (raw === null) return;
+        var r = L.addPayment(inv, raw);
+        if (!r.ok) { toast(r.error); return; }
+        save(); renderDashboard(); renderInvoices(); renderReminders(); renderClients();
+        toast('Payment recorded — balance ' + L.money(r.balance));
+      });
+    });
+    document.querySelectorAll('[data-dupe]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var inv = S.invoices.find(function (x) { return x.id === b.dataset.dupe; });
+        if (!inv) return;
+        var copy = L.cloneInvoice(inv, L.nextNumber(S.invoices));
+        S.invoices.push(copy); save();
+        renderDashboard(); renderInvoices(); renderReminders();
+        toast('Duplicated as ' + copy.number);
       });
     });
     document.querySelectorAll('[data-delinv]').forEach(function (b) {
@@ -212,6 +246,16 @@
     });
   }
   $('invFilter').addEventListener('change', renderInvoices);
+  $('invSearch').addEventListener('input', renderInvoices);
+  $('exportInvCsv').addEventListener('click', function () {
+    var blob = new Blob([L.invoicesToCSV(S.invoices)], { type: 'text/csv' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'invoicepilot-invoices.csv';
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+    toast('Invoices exported');
+  });
 
   /* ---- reminders ---- */
   var curTone = 'gentle';
