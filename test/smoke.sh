@@ -108,9 +108,9 @@ const invs=[{number:'INV-1',clientName:'Acme, Inc',issueDate:'2026-09-01',dueDat
 const csv=L.invoicesToCSV(invs);
 const lines=csv.split('\n');
 if(!/^Number,Client,Issue date/.test(lines[0])) throw new Error('header: '+lines[0]);
-if(!/Paid,Balance$/.test(lines[0])) throw new Error('paid/balance cols');
+if(!/Paid,Balance,Late fee$/.test(lines[0])) throw new Error('paid/balance/latefee cols');
 if(!/\"Acme, Inc\"/.test(csv)) throw new Error('quoting');
-if(!/,200\.00,50\.00,150\.00$/.test(lines[1])) throw new Error('paid/balance values: '+lines[1]);
+if(!/,200\.00,50\.00,150\.00,0\.00$/.test(lines[1])) throw new Error('paid/balance/latefee values: '+lines[1]);
 if(L.invoicesToCSV([]).split('\n').length!==1) throw new Error('empty');
 " && ok "invoicesToCSV (header, paid/balance, quoting)" || bad "invoicesToCSV"
 
@@ -133,6 +133,71 @@ grep -q 'id="invSearch"' "$D/public/index.html" && grep -q 'id="exportInvCsv"' "
 grep -q 'data-pay' "$D/public/js/app.js" && grep -q 'data-dupe' "$D/public/js/app.js" \
   && grep -q 'invSearch' "$D/public/js/app.js" && grep -q 'invoicesToCSV' "$D/public/js/app.js" \
   && ok "app.js wires payments/duplicate/search/CSV" || bad "app.js missing wiring"
+
+# late fees: 1.5%/mo on a $1000 balance, ~2 months overdue
+node -e "
+const L=require('$D/lib/logic.js');
+const now = new Date('2026-10-12T12:00:00').getTime();
+const inv = { number: 'INV-1', clientName: 'Acme', issueDate: '2026-07-01', dueDate: '2026-08-13',
+  items: [{ desc: 'Work', qty: 1, rate: 1000 }], lateFeePct: 1.5, status: 'unpaid', payments: [] };
+const days = L.daysOverdue(inv, now);
+const fee = L.lateFee(inv, null, now);
+const expect = Math.round(1000 * 0.015 * (days / 30) * 100) / 100;
+if (fee !== expect || !(fee > 0)) throw new Error('fee=' + fee + ' expect=' + expect);
+if (L.totalWithLateFee(inv, null, now) !== Math.round((1000 + expect) * 100) / 100) throw new Error('total with fee');
+if (L.lateFee(inv, 0, now) !== 0) throw new Error('zero rate should be 0');
+const noFee = { number: 'INV-2', clientName: 'Acme', issueDate: '2026-10-01', dueDate: '2026-10-20',
+  items: [{ desc: 'Work', qty: 1, rate: 500 }], status: 'unpaid', payments: [] };
+if (L.lateFee(noFee, null, now) !== 0) throw new Error('not-overdue should be 0');
+if (L.lateFeesTotal([inv, noFee], now) !== fee) throw new Error('lateFeesTotal');
+['gentle', 'firm', 'final'].forEach(function (tone) {
+  const d = L.dunningDraft(inv, { name: 'Acme Co' }, tone);
+  if (!/late fee/i.test(d.body)) throw new Error(tone + ' draft missing late fee');
+});
+" && ok "lateFee: 1.5%/mo accrues, all 3 draft tones name it" || bad "lateFee"
+
+# payer reliability profiles
+node -e "
+const L=require('$D/lib/logic.js');
+const now = new Date('2026-10-12T12:00:00').getTime();
+const invs = [
+  { number: 'A1', clientId: 'c1', clientName: 'Good', issueDate: '2026-01-01', dueDate: '2026-01-15',
+    items: [{ desc: 'x', qty: 1, rate: 100 }], status: 'paid',
+    payments: [{ amount: 100, date: '2026-01-14' }] },
+  { number: 'A2', clientId: 'c1', clientName: 'Good', issueDate: '2026-02-01', dueDate: '2026-02-15',
+    items: [{ desc: 'x', qty: 1, rate: 200 }], status: 'paid',
+    payments: [{ amount: 200, date: '2026-02-20' }] },
+  { number: 'B1', clientId: 'c2', clientName: 'Slow', issueDate: '2026-01-01', dueDate: '2026-02-01',
+    items: [{ desc: 'x', qty: 1, rate: 500 }], status: 'unpaid', payments: [] }
+];
+const good = L.payerProfile(invs, 'c1', now);
+if (good.rating !== 'usually-late' || good.avgDaysLate !== 2.5 || good.paid !== 2) throw new Error('good: ' + JSON.stringify(good));
+const slow = L.payerProfile(invs, 'c2', now);
+if (slow.rating !== 'slow' || slow.overdueCount !== 1 || slow.overdueBalance !== 500) throw new Error('slow: ' + JSON.stringify(slow));
+const none = L.payerProfile(invs, 'c9', now);
+if (none.invoices !== 0 || none.rating !== 'on-time') throw new Error('empty profile');
+" && ok "payerProfile: usually-late avg 2.5d, slow payer flagged" || bad "payerProfile"
+
+# recurring invoice cloning advances dates by cadence
+node -e "
+const L=require('$D/lib/logic.js');
+const inv = { number: 'INV-1', clientId: 'c1', clientName: 'Acme', businessName: 'Biz',
+  issueDate: '2026-10-01', dueDate: '2026-10-15', items: [{ desc: 'Retainer', qty: 1, rate: 500 }],
+  discountPct: 0, taxPct: 0, lateFeePct: 2, notes: '', status: 'paid', payments: [{ amount: 500, date: '2026-10-10' }] };
+const m = L.recurringClone(inv, 'monthly', 'INV-2');
+if (m.issueDate !== '2026-11-01' || m.dueDate !== '2026-11-15') throw new Error('monthly: ' + m.issueDate + '/' + m.dueDate);
+if (m.recurring !== 'monthly' || m.status !== 'unpaid' || m.payments.length !== 0) throw new Error('fresh state');
+if (m.lateFeePct !== 2 || m.items[0].rate !== 500) throw new Error('terms carried over');
+const q = L.recurringClone(inv, 'quarterly', 'INV-3');
+if (q.issueDate !== '2027-01-01') throw new Error('quarterly: ' + q.issueDate);
+const y = L.recurringClone(inv, 'yearly', 'INV-4');
+if (y.dueDate !== '2027-10-15') throw new Error('yearly: ' + y.dueDate);
+" && ok "recurringClone: monthly/quarterly/yearly advance dates, fresh state" || bad "recurringClone"
+
+grep -q 'fLate' "$D/public/index.html" \
+  && grep -q 'data-recur' "$D/public/js/app.js" && grep -q 'payerProfile' "$D/public/js/app.js" \
+  && grep -q 'lateFeesTotal' "$D/public/js/app.js" \
+  && ok "UI wires late-fee field, recur button, reliability badges" || bad "UI missing new wiring"
 
 echo "--- smoke: $PASS passed, $FAIL failed ---"
 exit $((FAIL>0))

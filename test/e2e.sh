@@ -1,5 +1,5 @@
 #!/bin/bash
-# invoicepilot-ai e2e tests — 6 flows (node logic + live HTTP)
+# invoicepilot-ai e2e tests — 12 flows (node logic + live HTTP)
 set -u
 D="$(cd "$(dirname "$0")/.." && pwd)"
 PASS=0; FAIL=0
@@ -116,6 +116,53 @@ if(!g.subject.includes('\$250.00')||!g.body.includes('\$250.00')) throw new Erro
 const f=L.dunningDraft(inv,{name:'Jane'},'final');
 if(!f.body.includes('250')) throw new Error('final missing balance');
 " && ok "flow9: dunning references remaining balance" || bad "flow9: dunning balance"
+
+# flow10: late-fee journey — overdue invoice accrues, draft bills it
+node -e "
+const L=require('$D/lib/logic.js');
+const now=new Date('2026-10-12T12:00:00').getTime();
+const inv={number:'INV-0010',clientName:'Late Larry',issueDate:'2026-06-01',dueDate:'2026-06-15',
+  items:[{qty:1,rate:2000}],lateFeePct:2,status:'unpaid',payments:[]};
+const fee=L.lateFee(inv,null,now);
+if(!(fee>0)) throw new Error('fee should accrue');
+const d=L.dunningDraft(inv,{name:'Late Larry'},'firm');
+if(!/late fee/i.test(d.body)) throw new Error('draft must bill the fee');
+L.addPayment(inv,500);
+const fee2=L.lateFee(inv,null,now);
+if(!(fee2<fee)) throw new Error('partial payment should shrink the fee base');
+" && ok "flow10: late fee accrues on overdue, draft bills it, partial payment shrinks it" || bad "flow10: late fee journey"
+
+# flow11: payer-profile journey — history reveals the slow payer
+node -e "
+const L=require('$D/lib/logic.js');
+const now=new Date('2026-10-12T12:00:00').getTime();
+const mk=(n,cid,due,pay,status)=>({number:n,clientId:cid,clientName:'C-'+cid,
+  issueDate:'2026-01-01',dueDate:due,items:[{qty:1,rate:100}],status,
+  payments:pay?[{amount:100,date:pay}]:[]});
+const invs=[
+  mk('P1','c1','2026-02-01','2026-02-01','paid'),
+  mk('P2','c1','2026-03-01','2026-03-01','paid'),
+  mk('Q1','c2','2026-02-01','2026-04-15','paid'),
+  mk('Q2','c2','2026-05-01',null,'unpaid')
+];
+const p1=L.payerProfile(invs,'c1',now);
+const p2=L.payerProfile(invs,'c2',now);
+if(p1.rating!=='on-time'||p1.avgDaysLate!==0) throw new Error('c1 should be on-time');
+if(p2.rating!=='slow'||p2.overdueCount!==1) throw new Error('c2 should be slow');
+" && ok "flow11: on-time vs slow payer profiles" || bad "flow11: payer profiles"
+
+# flow12: recurring journey — monthly retainer rolls forward
+node -e "
+const L=require('$D/lib/logic.js');
+const inv={number:'INV-0100',clientId:'c1',clientName:'Retainer Co',businessName:'Freelancer',
+  issueDate:'2026-09-01',dueDate:'2026-09-15',items:[{desc:'Retainer',qty:1,rate:800}],
+  discountPct:0,taxPct:0,lateFeePct:1,notes:'',status:'paid',payments:[{amount:800,date:'2026-09-10'}]};
+const next=L.recurringClone(inv,'monthly',L.nextNumber([inv]));
+if(next.number!=='INV-0101') throw new Error('numbering');
+if(next.issueDate!=='2026-10-01'||next.dueDate!=='2026-10-15') throw new Error('dates');
+if(next.status!=='unpaid'||L.balanceDue(next)!==800) throw new Error('fresh balance');
+if(next.recurring!=='monthly') throw new Error('cadence tag');
+" && ok "flow12: monthly retainer clones forward with fresh balance" || bad "flow12: recurring"
 
 kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
 echo "--- e2e: $PASS passed, $FAIL failed ---"

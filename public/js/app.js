@@ -40,13 +40,18 @@
       var o = document.createElement('option'); o.value = c.id; o.textContent = c.name; sel.appendChild(o);
     });
     var ct = L.clientTotals(S.invoices);
-    var html = '<table><tr><th>Name</th><th>Email</th><th>Invoices</th><th>Unpaid</th><th>Overdue</th><th></th></tr>';
+    var html = '<table><tr><th>Name</th><th>Email</th><th>Invoices</th><th>Unpaid</th><th>Overdue</th><th>Reliability</th><th></th></tr>';
     S.clients.forEach(function (c) {
       var invs = S.invoices.filter(function (i) { return i.clientId === c.id; });
       var g = ct[c.id] || { unpaid: 0, overdue: 0 };
+      var prof = L.payerProfile(S.invoices, c.id);
+      var badge = prof.invoices === 0 ? '<span class="muted">—</span>'
+        : '<span class="pill pay-' + prof.rating + '" title="' + prof.paid + ' paid · avg ' + prof.avgDaysLate +
+          ' days late' + (prof.overdueCount ? ' · ' + prof.overdueCount + ' overdue now' : '') + '">' +
+          (prof.rating === 'on-time' ? 'On time' : prof.rating === 'usually-late' ? 'Usually late' : 'Slow payer') + '</span>';
       html += '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.email || '—') + '</td><td>' + invs.length +
         '</td><td>' + L.money(g.unpaid) + '</td><td>' + (g.overdue > 0 ? '<strong>' + L.money(g.overdue) + '</strong>' : L.money(0)) +
-        '</td><td><button class="ghost" data-delclient="' + c.id + '">Delete</button></td></tr>';
+        '</td><td>' + badge + '</td><td><button class="ghost" data-delclient="' + c.id + '">Delete</button></td></tr>';
     });
     $('clientList').innerHTML = html + '</table>';
     document.querySelectorAll('[data-delclient]').forEach(function (b) {
@@ -105,6 +110,7 @@
       items: items.map(function (it) { return { desc: it.desc, qty: Number(it.qty) || 0, rate: Number(it.rate) || 0 }; }),
       discountPct: Number($('fDisc').value) || 0,
       taxPct: Number($('fTax').value) || 0,
+      lateFeePct: Math.min(100, Math.max(0, Number($('fLate').value) || 0)),
       notes: $('fNotes').value, status: 'unpaid'
     };
   }
@@ -124,9 +130,10 @@
       (t.discount ? '<div>Discount (' + t.discountPct + '%): −' + L.money(t.discount) + '</div>' : '') +
       (t.tax ? '<div>Tax (' + t.taxPct + '%): ' + L.money(t.tax) + '</div>' : '') +
       '<div style="font-size:1.3rem;font-weight:800">Total: ' + L.money(t.total) + '</div></div>' +
+      (inv.lateFeePct > 0 ? '<p class="muted">Late fee: ' + inv.lateFeePct + '% per month on overdue balances.</p>' : '') +
       (inv.notes ? '<p class="muted">' + esc(inv.notes) + '</p>' : '');
   }
-  ['fClient', 'fIssue', 'fDue', 'fDisc', 'fTax', 'fNotes'].forEach(function (id) {
+  ['fClient', 'fIssue', 'fDue', 'fDisc', 'fTax', 'fLate', 'fNotes'].forEach(function (id) {
     $(id).addEventListener('input', renderPreview);
   });
 
@@ -134,7 +141,7 @@
     $('invNumberLabel').dataset.num = L.nextNumber(S.invoices);
     $('invNumberLabel').textContent = $('invNumberLabel').dataset.num;
     $('fIssue').value = todayStr(); $('fDue').value = plusDays(14);
-    $('fDisc').value = 0; $('fTax').value = 0; $('fNotes').value = '';
+    $('fDisc').value = 0; $('fTax').value = 0; $('fLate').value = 0; $('fNotes').value = '';
     items = [blankItem()]; renderItems(); renderPreview(); $('formErr').textContent = '';
   }
 
@@ -169,9 +176,11 @@
     $('agingLegend').innerHTML = keys.map(function (k) {
       return '<span><span class="dot" style="background:' + AGING_COLORS[k] + '"></span>' + k + ' · <strong>' + L.money(d.buckets[k] || 0) + '</strong></span>';
     }).join('');
+    var fees = L.lateFeesTotal(S.invoices);
     $('dashCards').innerHTML =
       stat(L.money(d.outstanding), 'Outstanding', '') +
       stat(L.money(d.overdue), 'Overdue', d.overdue > 0 ? 'bad' : '') +
+      stat(L.money(fees), 'Late fees accrued', fees > 0 ? 'bad' : '') +
       stat(L.money(d.paid), 'Collected', 'good') +
       stat(d.count, 'Invoices', '');
     var rows = S.invoices
@@ -198,16 +207,20 @@
         return ((i.number || '') + ' ' + (i.clientName || '')).toLowerCase().indexOf(q) !== -1;
       })
       .map(function (i) {
-        var st = L.statusOf(i), t = L.totals(i).total, bal = L.balanceDue(i);
+        var st = L.statusOf(i), t = L.totals(i).total, bal = L.balanceDue(i), fee = L.lateFee(i);
         return '<tr><td>' + esc(i.number) + '</td><td>' + esc(i.clientName) + '</td><td>' + esc(i.dueDate) +
           '</td><td>' + L.money(t) + '</td><td>' + (st === 'paid' ? '—' : L.money(bal)) +
-          '</td><td><span class="pill ' + st + '">' + st + '</span></td><td>' +
+          '</td><td>' + (fee > 0 ? L.money(fee) : '—') +
+          '</td><td><span class="pill ' + st + '">' + st + '</span>' +
+          (i.recurring ? ' <span class="pill recur" title="Recurs ' + esc(i.recurring) + '">↻ ' + esc(i.recurring) + '</span>' : '') +
+          '</td><td>' +
           (st === 'paid' ? '' : '<button class="ghost" data-pay="' + i.id + '">Record payment</button> ' +
             '<button class="ghost" data-paid="' + i.id + '">Mark paid</button> ') +
           '<button class="ghost" data-dupe="' + i.id + '">Duplicate</button> ' +
+          '<button class="ghost" data-recur="' + i.id + '" title="Create the next invoice in a recurring series">Recur</button> ' +
           '<button class="ghost" data-delinv="' + i.id + '">Delete</button></td></tr>';
       }).join('');
-    $('invList').innerHTML = rows ? '<table><tr><th>#</th><th>Client</th><th>Due</th><th>Total</th><th>Balance</th><th>Status</th><th></th></tr>' + rows + '</table>'
+    $('invList').innerHTML = rows ? '<table><tr><th>#</th><th>Client</th><th>Due</th><th>Total</th><th>Balance</th><th>Late fee</th><th>Status</th><th></th></tr>' + rows + '</table>'
       : '<p class="muted">No invoices here yet.</p>';
     document.querySelectorAll('[data-paid]').forEach(function (b) {
       b.addEventListener('click', function () {
@@ -235,6 +248,19 @@
         S.invoices.push(copy); save();
         renderDashboard(); renderInvoices(); renderReminders();
         toast('Duplicated as ' + copy.number);
+      });
+    });
+    document.querySelectorAll('[data-recur]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var inv = S.invoices.find(function (x) { return x.id === b.dataset.recur; });
+        if (!inv) return;
+        var cad = (prompt('Recurring cadence for ' + inv.number + ' (monthly / quarterly / yearly):', inv.recurring || 'monthly') || '').trim().toLowerCase();
+        if (!cad) return;
+        if (!L.CADENCES[cad]) { toast('Cadence must be monthly, quarterly, or yearly'); return; }
+        var copy = L.recurringClone(inv, cad, L.nextNumber(S.invoices));
+        S.invoices.push(copy); save();
+        renderDashboard(); renderInvoices(); renderReminders(); renderClients();
+        toast('Recurring invoice ' + copy.number + ' created (' + cad + ')');
       });
     });
     document.querySelectorAll('[data-delinv]').forEach(function (b) {

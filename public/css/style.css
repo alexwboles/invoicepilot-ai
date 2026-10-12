@@ -225,3 +225,9 @@ footer { text-align: center; padding: 26px 20px; border-top: 1px solid var(--lin
   .panel { box-shadow: none; border: none; padding: 0; }
   .invoice-preview { position: static; }
 }
+
+/* ---------- reliability + recurring pills (no rounded edges) ---------- */
+.pill.pay-on-time { background: var(--green-soft); color: var(--green); }
+.pill.pay-usually-late { background: #fef3c7; color: #b45309; }
+.pill.pay-slow { background: var(--red-soft); color: var(--red); }
+.pill.recur { background: var(--navy-soft); color: var(--navy); text-transform: none; letter-spacing: 0; }
