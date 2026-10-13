@@ -235,6 +235,15 @@ grep -q 'id="fEstimate"' "$D/public/index.html" \
   && grep -q 'renderTax' "$D/public/js/app.js" \
   && grep -q 'renderStatement' "$D/public/js/app.js" \
   && ok "UI wires estimate checkbox, tax panel, statement panel" || bad "UI missing new wiring"
+grep -q 'sheet-stamp' "$D/public/js/app.js" \
+  && grep -q 'due-hero' "$D/public/js/app.js" \
+  && grep -q 'dueUrgency' "$D/public/js/app.js" \
+  && grep -q 'overdueCallout' "$D/public/index.html" \
+  && grep -q 'goTab' "$D/public/js/app.js" \
+  && grep -q 'sheet-mast' "$D/public/css/style.css" \
+  && grep -q 'duechip' "$D/public/css/style.css" \
+  && grep -q 'callout' "$D/public/css/style.css" \
+  && ok "UI wires invoice sheet, due urgency, overdue callout" || bad "UI missing redesign wiring"
 
 echo "--- smoke: $PASS passed, $FAIL failed ---"
 exit $((FAIL>0))

@@ -158,15 +158,62 @@ input:focus, select:focus { border-color: var(--navy); outline: none; box-shadow
 .itemrow .del:hover { color: var(--red); border-color: #efc4c1; background: var(--red-soft); }
 #addItem { margin: 4px 0 14px; }
 
-/* ---------- invoice document preview ---------- */
+/* ---------- invoice document sheet ---------- */
 .invoice-preview { position: sticky; top: 86px; }
-.invhead {
-  display: flex; justify-content: space-between; gap: 16px; align-items: flex-start;
-  padding-bottom: 16px; margin-bottom: 16px; border-bottom: 3px solid var(--navy);
+.sheet {
+  background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow);
+  padding: 34px 36px; font-size: 14px;
 }
-.invhead h2 { margin: 0; font-size: 22px; }
-.invoice-preview table { box-shadow: none; border: none; }
-.invoice-preview th { background: none; }
+.sheet-mast {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+  padding-bottom: 20px; margin-bottom: 20px; border-bottom: 4px solid var(--navy);
+}
+.sheet-biz { font-family: var(--serif); font-size: 26px; font-weight: 700; letter-spacing: -.4px; }
+.sheet-tag { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.sheet-stamp {
+  font-family: var(--mono); font-size: 13px; font-weight: 800; letter-spacing: 3px;
+  color: var(--navy); border: 2px solid var(--navy); padding: 8px 14px; text-align: center;
+  transform: rotate(-2deg);
+}
+.sheet-stamp.est { color: var(--amber); border-color: var(--amber); }
+.sheet-stamp span { display: block; font-size: 11px; letter-spacing: 1px; margin-top: 2px; }
+.sheet-meta { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.sheet-cap { display: block; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.6px; color: var(--muted); margin-bottom: 4px; }
+.sheet-billto strong { font-size: 16px; }
+.sheet-dates { display: flex; gap: 26px; text-align: right; }
+.sheet-dates b { font-variant-numeric: tabular-nums; }
+table.sheet-items { width: 100%; border-collapse: collapse; box-shadow: none; border: none; margin: 0; }
+.sheet-items th {
+  background: none; font-size: 10.5px; text-transform: uppercase; letter-spacing: 1.6px;
+  color: var(--muted); border-bottom: 2px solid var(--navy); padding: 8px 6px;
+}
+.sheet-items td { border-bottom: 1px solid var(--line-soft); padding: 10px 6px; }
+.sheet-items .r { text-align: right; font-variant-numeric: tabular-nums; }
+.sheet-totals { margin-top: 18px; margin-left: auto; max-width: 300px; }
+.trow { display: flex; justify-content: space-between; padding: 5px 0; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+.due-hero {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  background: var(--navy); color: #fff; padding: 14px 16px; margin-top: 10px;
+}
+.due-hero span { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.8px; }
+.due-hero strong { font-family: var(--serif); font-size: 30px; font-variant-numeric: tabular-nums; }
+.sheet-foot { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 12.5px; }
+.sheet-foot p { margin: 4px 0; }
+
+/* ---------- due urgency chips + overdue callout ---------- */
+.duechip {
+  display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .4px;
+  background: var(--line-soft); color: var(--ink-soft); padding: 2px 8px; margin-top: 3px; white-space: nowrap;
+}
+.duechip.soon { background: var(--navy-soft); color: var(--navy); }
+.duechip.today { background: var(--amber-soft); color: var(--amber); }
+.duechip.late { background: var(--red-soft); color: var(--red); }
+#invList td:first-child { white-space: nowrap; font-weight: 600; }
+.callout {
+  background: var(--red-soft); border: 1px solid var(--red); border-left: 6px solid var(--red);
+  color: var(--ink); padding: 14px 18px; margin: 18px 0; font-size: 14.5px;
+}
+.callout a { color: var(--red); font-weight: 800; }
 
 /* ---------- reminders ---------- */
 .tones { margin: 6px 0 18px; }

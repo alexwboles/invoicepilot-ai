@@ -23,13 +23,16 @@
   function plusDays(n) { var d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
 
   /* ---- tabs ---- */
+  function goTab(name) {
+    document.querySelectorAll('#tabs button').forEach(function (x) { x.classList.remove('active'); });
+    document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
+    var b = document.querySelector('#tabs button[data-tab="' + name + '"]');
+    if (b) b.classList.add('active');
+    $('tab-' + name).classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
   document.querySelectorAll('#tabs button').forEach(function (b) {
-    b.addEventListener('click', function () {
-      document.querySelectorAll('#tabs button').forEach(function (x) { x.classList.remove('active'); });
-      document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
-      b.classList.add('active');
-      $('tab-' + b.dataset.tab).classList.add('active');
-    });
+    b.addEventListener('click', function () { goTab(b.dataset.tab); });
   });
 
   /* ---- clients ---- */
@@ -153,22 +156,31 @@
     var inv = currentDraft(), t = L.totals(inv);
     var isEst = L.isEstimate(inv);
     var rows = inv.items.map(function (it) {
-      return '<tr><td>' + esc(it.desc || '—') + '</td><td>' + it.qty + '</td><td>' + L.money(it.rate) +
-        '</td><td>' + L.money(L.lineTotal(it)) + '</td></tr>';
+      return '<tr><td>' + esc(it.desc || '—') + '</td><td class="r">' + it.qty + '</td><td class="r">' + L.money(it.rate) +
+        '</td><td class="r">' + L.money(L.lineTotal(it)) + '</td></tr>';
     }).join('');
     $('preview').innerHTML =
-      '<div class="invhead"><div><h2>' + esc(inv.businessName) + '</h2><div class="muted">' +
-      (isEst ? 'ESTIMATE ' : 'INVOICE ') + esc(inv.number) + '</div></div>' +
-      '<div style="text-align:right"><div><strong>Bill to:</strong> ' + esc(inv.clientName || '—') + '</div>' +
-      '<div class="muted">Issued ' + esc(inv.issueDate || '—') + ' · Due ' + esc(inv.dueDate || '—') + '</div></div></div>' +
-      '<table><tr><th>Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>' + rows + '</table>' +
-      '<div style="text-align:right;margin-top:10px">' +
-      '<div>Subtotal: ' + L.money(t.subtotal) + '</div>' +
-      (t.discount ? '<div>Discount (' + t.discountPct + '%): −' + L.money(t.discount) + '</div>' : '') +
-      (t.tax ? '<div>Tax (' + t.taxPct + '%): ' + L.money(t.tax) + '</div>' : '') +
-      '<div style="font-size:1.3rem;font-weight:800">Total: ' + L.money(t.total) + '</div></div>' +
-      (inv.lateFeePct > 0 ? '<p class="muted">Late fee: ' + inv.lateFeePct + '% per month on overdue balances.</p>' : '') +
-      (inv.notes ? '<p class="muted">' + esc(inv.notes) + '</p>' : '');
+      '<div class="sheet">' +
+      '<div class="sheet-mast"><div><div class="sheet-biz">' + esc(inv.businessName) + '</div>' +
+      '<div class="sheet-tag">Thank you for your business</div></div>' +
+      '<div class="sheet-stamp' + (isEst ? ' est' : '') + '">' + (isEst ? 'ESTIMATE' : 'INVOICE') +
+      '<span>' + esc(inv.number) + '</span></div></div>' +
+      '<div class="sheet-meta"><div class="sheet-billto"><span class="sheet-cap">Bill to</span><strong>' +
+      esc(inv.clientName || '—') + '</strong></div>' +
+      '<div class="sheet-dates"><div><span class="sheet-cap">Issued</span><b>' + esc(inv.issueDate || '—') +
+      '</b></div><div><span class="sheet-cap">Due</span><b>' + esc(inv.dueDate || '—') + '</b></div></div></div>' +
+      '<table class="sheet-items"><thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table>' +
+      '<div class="sheet-totals">' +
+      '<div class="trow"><span>Subtotal</span><b>' + L.money(t.subtotal) + '</b></div>' +
+      (t.discount ? '<div class="trow"><span>Discount (' + t.discountPct + '%)</span><b>−' + L.money(t.discount) + '</b></div>' : '') +
+      (t.tax ? '<div class="trow"><span>Tax (' + t.taxPct + '%)</span><b>' + L.money(t.tax) + '</b></div>' : '') +
+      '<div class="due-hero"><span>' + (isEst ? 'Estimated total' : 'Amount due') + '</span><strong>' + L.money(t.total) + '</strong></div>' +
+      '</div>' +
+      '<div class="sheet-foot">' +
+      (inv.lateFeePct > 0 ? '<p>Late fee: ' + inv.lateFeePct + '% per month on overdue balances.</p>' : '') +
+      (inv.notes ? '<p>' + esc(inv.notes) + '</p>' : '') +
+      '</div></div>';
   }
   ['fClient', 'fIssue', 'fDue', 'fDisc', 'fTax', 'fLate', 'fNotes', 'fEstimate'].forEach(function (id) {
     $(id).addEventListener('input', renderPreview);
@@ -205,6 +217,14 @@
     $('heroOutstanding').textContent = L.money(d.outstanding + d.overdue);
     $('heroSub').textContent = unpaid.length + ' unpaid invoice' + (unpaid.length === 1 ? '' : 's') +
       ' · ' + L.money(d.overdue) + ' overdue';
+    var odCount = billable.filter(function (i) { return L.statusOf(i) === 'overdue'; }).length;
+    $('overdueCallout').innerHTML = d.overdue > 0
+      ? '<div class="callout"><strong>' + L.money(d.overdue) + ' overdue</strong> across ' + odCount +
+        ' invoice' + (odCount === 1 ? '' : 's') +
+        ' — <a href="#" id="goRemind">draft reminders</a> and get paid.</div>'
+      : '';
+    var go = $('goRemind');
+    if (go) go.addEventListener('click', function (e) { e.preventDefault(); goTab('remind'); });
     var keys = ['current', '1-30 days', '31-60 days', '60+ days'];
     var tot = keys.reduce(function (s, k) { return s + (d.buckets[k] || 0); }, 0);
     $('agingBar').innerHTML = keys.map(function (k) {
@@ -256,6 +276,19 @@
   function stat(v, l, cls) { return '<div class="stat ' + cls + '"><div class="v">' + v + '</div><div class="l">' + l + '</div></div>'; }
 
   /* ---- invoices list ---- */
+  function dueUrgency(inv) {
+    var st = L.statusOf(inv);
+    if (st === 'paid' || L.isEstimate(inv)) return '';
+    var od = L.daysOverdue(inv);
+    if (od > 0) return '<span class="duechip late">' + od + 'd overdue</span>';
+    var due = new Date(inv.dueDate + 'T23:59:59').getTime();
+    if (isNaN(due)) return '';
+    var days = Math.ceil((due - Date.now()) / 86400000);
+    if (days <= 0) return '<span class="duechip today">due today</span>';
+    if (days <= 7) return '<span class="duechip soon">due in ' + days + 'd</span>';
+    return '<span class="duechip">due in ' + days + 'd</span>';
+  }
+
   function renderInvoices() {
     var f = $('invFilter').value;
     var q = ($('invSearch').value || '').trim().toLowerCase();
@@ -286,6 +319,7 @@
             '<button class="ghost" data-delinv="' + i.id + '">Delete</button>';
         }
         return '<tr><td>' + esc(i.number) + '</td><td>' + esc(i.clientName) + '</td><td>' + esc(i.dueDate) +
+          (dueUrgency(i) ? '<br>' + dueUrgency(i) : '') +
           '</td><td>' + L.money(t) + '</td><td>' + (st === 'paid' || isEst ? '—' : L.money(bal)) +
           '</td><td>' + (fee > 0 && !isEst ? L.money(fee) : '—') +
           '</td><td><span class="pill ' + st + '">' + pillLabel + '</span>' +
