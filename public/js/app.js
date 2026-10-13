@@ -51,9 +51,13 @@
           (prof.rating === 'on-time' ? 'On time' : prof.rating === 'usually-late' ? 'Usually late' : 'Slow payer') + '</span>';
       html += '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.email || '—') + '</td><td>' + invs.length +
         '</td><td>' + L.money(g.unpaid) + '</td><td>' + (g.overdue > 0 ? '<strong>' + L.money(g.overdue) + '</strong>' : L.money(0)) +
-        '</td><td>' + badge + '</td><td><button class="ghost" data-delclient="' + c.id + '">Delete</button></td></tr>';
+        '</td><td>' + badge + '</td><td><button class="ghost" data-statement="' + c.id + '">Statement</button> ' +
+        '<button class="ghost" data-delclient="' + c.id + '">Delete</button></td></tr>';
     });
     $('clientList').innerHTML = html + '</table>';
+    document.querySelectorAll('[data-statement]').forEach(function (b) {
+      b.addEventListener('click', function () { renderStatement(b.dataset.statement); });
+    });
     document.querySelectorAll('[data-delclient]').forEach(function (b) {
       b.addEventListener('click', function () {
         if (!confirm('Delete this client? Invoices stay.')) return;
@@ -73,6 +77,35 @@
   $('saveBiz').addEventListener('click', function () {
     S.biz = $('sBiz').value.trim(); save(); toast('Business name saved');
   });
+
+  /* ---- client statement of account ---- */
+  function renderStatement(clientId) {
+    var c = S.clients.find(function (x) { return x.id === clientId; });
+    var s = L.clientStatement(S.invoices, clientId);
+    var rows = s.lines.map(function (l) {
+      return '<tr><td>' + esc(l.number) + '</td><td>' + esc(l.issueDate) + '</td><td>' + esc(l.dueDate) +
+        '</td><td>' + L.money(l.total) + '</td><td>' + L.money(l.paid) + '</td><td>' + L.money(l.balance) +
+        '</td><td><span class="pill ' + l.status + '">' + l.status + '</span></td></tr>';
+    }).join('');
+    var p = $('stmtPanel');
+    p.style.display = '';
+    p.innerHTML =
+      '<div class="invhead"><div><h2>' + esc(S.biz || 'Your Business') + '</h2><div class="muted">STATEMENT OF ACCOUNT</div></div>' +
+      '<div style="text-align:right"><div><strong>' + esc(c ? c.name : s.name) + '</strong></div>' +
+      '<div class="muted">As of ' + esc(todayStr()) + '</div></div></div>' +
+      (rows ? '<table><tr><th>Invoice</th><th>Issued</th><th>Due</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th></tr>' + rows + '</table>'
+        : '<p class="muted">No invoices for this client yet.</p>') +
+      '<div style="text-align:right;margin-top:10px">' +
+      '<div>Total billed: ' + L.money(s.totalBilled) + '</div>' +
+      '<div>Total paid: ' + L.money(s.totalPaid) + '</div>' +
+      (s.overdueBalance > 0 ? '<div>Overdue: <strong>' + L.money(s.overdueBalance) + '</strong></div>' : '') +
+      '<div style="font-size:1.3rem;font-weight:800">Balance due: ' + L.money(s.balance) + '</div></div>' +
+      '<div class="row" style="margin-top:10px"><button id="printStmt" class="ghost">Print statement</button> ' +
+      '<button id="closeStmt" class="ghost">Close</button></div>';
+    $('printStmt').addEventListener('click', function () { window.print(); });
+    $('closeStmt').addEventListener('click', function () { p.style.display = 'none'; p.innerHTML = ''; });
+    p.scrollIntoView();
+  }
 
   /* ---- new invoice form ---- */
   var items = [];
@@ -101,7 +134,9 @@
 
   function currentDraft() {
     var c = S.clients.find(function (x) { return x.id === $('fClient').value; });
+    var est = $('fEstimate').checked;
     return {
+      kind: est ? 'estimate' : 'invoice',
       number: $('invNumberLabel').dataset.num,
       clientId: c ? c.id : '',
       clientName: c ? c.name : '',
@@ -111,17 +146,19 @@
       discountPct: Number($('fDisc').value) || 0,
       taxPct: Number($('fTax').value) || 0,
       lateFeePct: Math.min(100, Math.max(0, Number($('fLate').value) || 0)),
-      notes: $('fNotes').value, status: 'unpaid'
+      notes: $('fNotes').value, status: est ? 'estimate' : 'unpaid'
     };
   }
   function renderPreview() {
     var inv = currentDraft(), t = L.totals(inv);
+    var isEst = L.isEstimate(inv);
     var rows = inv.items.map(function (it) {
       return '<tr><td>' + esc(it.desc || '—') + '</td><td>' + it.qty + '</td><td>' + L.money(it.rate) +
         '</td><td>' + L.money(L.lineTotal(it)) + '</td></tr>';
     }).join('');
     $('preview').innerHTML =
-      '<div class="invhead"><div><h2>' + esc(inv.businessName) + '</h2><div class="muted">INVOICE ' + esc(inv.number) + '</div></div>' +
+      '<div class="invhead"><div><h2>' + esc(inv.businessName) + '</h2><div class="muted">' +
+      (isEst ? 'ESTIMATE ' : 'INVOICE ') + esc(inv.number) + '</div></div>' +
       '<div style="text-align:right"><div><strong>Bill to:</strong> ' + esc(inv.clientName || '—') + '</div>' +
       '<div class="muted">Issued ' + esc(inv.issueDate || '—') + ' · Due ' + esc(inv.dueDate || '—') + '</div></div></div>' +
       '<table><tr><th>Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>' + rows + '</table>' +
@@ -133,15 +170,17 @@
       (inv.lateFeePct > 0 ? '<p class="muted">Late fee: ' + inv.lateFeePct + '% per month on overdue balances.</p>' : '') +
       (inv.notes ? '<p class="muted">' + esc(inv.notes) + '</p>' : '');
   }
-  ['fClient', 'fIssue', 'fDue', 'fDisc', 'fTax', 'fLate', 'fNotes'].forEach(function (id) {
+  ['fClient', 'fIssue', 'fDue', 'fDisc', 'fTax', 'fLate', 'fNotes', 'fEstimate'].forEach(function (id) {
     $(id).addEventListener('input', renderPreview);
   });
+  $('fEstimate').addEventListener('change', renderPreview);
 
   function resetForm() {
     $('invNumberLabel').dataset.num = L.nextNumber(S.invoices);
     $('invNumberLabel').textContent = $('invNumberLabel').dataset.num;
     $('fIssue').value = todayStr(); $('fDue').value = plusDays(14);
     $('fDisc').value = 0; $('fTax').value = 0; $('fLate').value = 0; $('fNotes').value = '';
+    $('fEstimate').checked = false;
     items = [blankItem()]; renderItems(); renderPreview(); $('formErr').textContent = '';
   }
 
@@ -153,7 +192,7 @@
     inv.payments = [];
     S.invoices.push(inv); save();
     resetForm(); renderDashboard(); renderInvoices(); renderReminders();
-    toast('Invoice ' + inv.number + ' saved');
+    toast((L.isEstimate(inv) ? 'Estimate ' : 'Invoice ') + inv.number + ' saved');
   });
   $('printInv').addEventListener('click', function () { renderPreview(); window.print(); });
 
@@ -161,7 +200,8 @@
   var AGING_COLORS = { 'current': '#2f6f4f', '1-30 days': '#d97706', '31-60 days': '#c2410c', '60+ days': '#b91c1c' };
   function renderDashboard() {
     var d = L.dashboard(S.invoices);
-    var unpaid = S.invoices.filter(function (i) { return L.statusOf(i) !== 'paid'; });
+    var billable = S.invoices.filter(function (i) { return !L.isEstimate(i); });
+    var unpaid = billable.filter(function (i) { return L.statusOf(i) !== 'paid'; });
     $('heroOutstanding').textContent = L.money(d.outstanding + d.overdue);
     $('heroSub').textContent = unpaid.length + ' unpaid invoice' + (unpaid.length === 1 ? '' : 's') +
       ' · ' + L.money(d.overdue) + ' overdue';
@@ -183,7 +223,7 @@
       stat(L.money(fees), 'Late fees accrued', fees > 0 ? 'bad' : '') +
       stat(L.money(d.paid), 'Collected', 'good') +
       stat(d.count, 'Invoices', '');
-    var rows = S.invoices
+    var rows = billable
       .filter(function (i) { return L.statusOf(i) !== 'paid'; })
       .sort(function (a, b) { return L.daysOverdue(b) - L.daysOverdue(a); })
       .map(function (i) {
@@ -193,6 +233,25 @@
       }).join('');
     $('agingList').innerHTML = rows ? '<table><tr><th>#</th><th>Client</th><th>Total</th><th>Aging</th><th>Status</th></tr>' + rows + '</table>'
       : '<p class="muted">Nothing unpaid.</p>';
+    renderTax();
+  }
+
+  /* ---- tax summary: quarterly billed vs collected tax ---- */
+  function renderTax() {
+    var yr = Number($('taxYear').value);
+    if (!(yr >= 2000 && yr <= 2100)) yr = new Date().getFullYear();
+    $('taxYear').value = yr;
+    var s = L.taxSummary(S.invoices, yr);
+    var rows = s.quarters.map(function (q) {
+      return '<tr><td>Q' + q.quarter + '</td><td>' + L.money(q.invoiced) + '</td><td>' + L.money(q.taxBilled) +
+        '</td><td>' + L.money(q.collected) + '</td><td>' + L.money(q.taxCollected) + '</td></tr>';
+    }).join('');
+    var t = s.total;
+    rows += '<tr class="totalrow"><td><strong>Total</strong></td><td><strong>' + L.money(t.invoiced) + '</strong></td><td><strong>' +
+      L.money(t.taxBilled) + '</strong></td><td><strong>' + L.money(t.collected) + '</strong></td><td><strong>' +
+      L.money(t.taxCollected) + '</strong></td></tr>';
+    $('taxTable').innerHTML = '<table><tr><th>Quarter</th><th>Invoiced</th><th>Tax billed</th><th>Collected</th><th>Tax collected*</th></tr>' +
+      rows + '</table><p class="muted small">*Tax collected is pro-rata on the paid fraction of each invoice — an estimate for your books, not tax advice.</p>';
   }
   function stat(v, l, cls) { return '<div class="stat ' + cls + '"><div class="v">' + v + '</div><div class="l">' + l + '</div></div>'; }
 
@@ -201,24 +260,37 @@
     var f = $('invFilter').value;
     var q = ($('invSearch').value || '').trim().toLowerCase();
     var rows = S.invoices.slice().reverse()
-      .filter(function (i) { return f === 'all' || L.statusOf(i) === f; })
+      .filter(function (i) {
+        if (f === 'all') return true;
+        if (f === 'estimate') return L.isEstimate(i);
+        return L.statusOf(i) === f;
+      })
       .filter(function (i) {
         if (!q) return true;
         return ((i.number || '') + ' ' + (i.clientName || '')).toLowerCase().indexOf(q) !== -1;
       })
       .map(function (i) {
         var st = L.statusOf(i), t = L.totals(i).total, bal = L.balanceDue(i), fee = L.lateFee(i);
-        return '<tr><td>' + esc(i.number) + '</td><td>' + esc(i.clientName) + '</td><td>' + esc(i.dueDate) +
-          '</td><td>' + L.money(t) + '</td><td>' + (st === 'paid' ? '—' : L.money(bal)) +
-          '</td><td>' + (fee > 0 ? L.money(fee) : '—') +
-          '</td><td><span class="pill ' + st + '">' + st + '</span>' +
-          (i.recurring ? ' <span class="pill recur" title="Recurs ' + esc(i.recurring) + '">↻ ' + esc(i.recurring) + '</span>' : '') +
-          '</td><td>' +
-          (st === 'paid' ? '' : '<button class="ghost" data-pay="' + i.id + '">Record payment</button> ' +
+        var isEst = L.isEstimate(i);
+        var pillLabel = st === 'estimate' ? 'Estimate' : st === 'converted' ? 'Converted' : st;
+        var actions;
+        if (st === 'estimate') {
+          actions = '<button class="ghost" data-convert="' + i.id + '">Convert to invoice</button> ' +
+            '<button class="ghost" data-dupe="' + i.id + '">Duplicate</button> ' +
+            '<button class="ghost" data-delinv="' + i.id + '">Delete</button>';
+        } else {
+          actions = (st === 'paid' ? '' : '<button class="ghost" data-pay="' + i.id + '">Record payment</button> ' +
             '<button class="ghost" data-paid="' + i.id + '">Mark paid</button> ') +
-          '<button class="ghost" data-dupe="' + i.id + '">Duplicate</button> ' +
-          '<button class="ghost" data-recur="' + i.id + '" title="Create the next invoice in a recurring series">Recur</button> ' +
-          '<button class="ghost" data-delinv="' + i.id + '">Delete</button></td></tr>';
+            '<button class="ghost" data-dupe="' + i.id + '">Duplicate</button> ' +
+            (isEst ? '' : '<button class="ghost" data-recur="' + i.id + '" title="Create the next invoice in a recurring series">Recur</button> ') +
+            '<button class="ghost" data-delinv="' + i.id + '">Delete</button>';
+        }
+        return '<tr><td>' + esc(i.number) + '</td><td>' + esc(i.clientName) + '</td><td>' + esc(i.dueDate) +
+          '</td><td>' + L.money(t) + '</td><td>' + (st === 'paid' || isEst ? '—' : L.money(bal)) +
+          '</td><td>' + (fee > 0 && !isEst ? L.money(fee) : '—') +
+          '</td><td><span class="pill ' + st + '">' + pillLabel + '</span>' +
+          (i.recurring ? ' <span class="pill recur" title="Recurs ' + esc(i.recurring) + '">↻ ' + esc(i.recurring) + '</span>' : '') +
+          '</td><td>' + actions + '</td></tr>';
       }).join('');
     $('invList').innerHTML = rows ? '<table><tr><th>#</th><th>Client</th><th>Due</th><th>Total</th><th>Balance</th><th>Late fee</th><th>Status</th><th></th></tr>' + rows + '</table>'
       : '<p class="muted">No invoices here yet.</p>';
@@ -261,6 +333,17 @@
         S.invoices.push(copy); save();
         renderDashboard(); renderInvoices(); renderReminders(); renderClients();
         toast('Recurring invoice ' + copy.number + ' created (' + cad + ')');
+      });
+    });
+    document.querySelectorAll('[data-convert]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var inv = S.invoices.find(function (x) { return x.id === b.dataset.convert; });
+        if (!inv || !L.isEstimate(inv)) return;
+        var copy = L.convertEstimate(inv, L.nextNumber(S.invoices), todayStr());
+        inv.status = 'converted'; // retire the quote; it stays as the paper trail
+        S.invoices.push(copy); save();
+        renderDashboard(); renderInvoices(); renderReminders(); renderClients();
+        toast('Estimate ' + inv.number + ' converted to invoice ' + copy.number);
       });
     });
     document.querySelectorAll('[data-delinv]').forEach(function (b) {
@@ -339,6 +422,7 @@
   });
 
   /* ---- init ---- */
+  $('taxGo').addEventListener('click', renderTax);
   if (!S.clients.length && !S.invoices.length) {
     // seed one demo client so the app isn't empty on first run
     S.clients.push({ id: 'c-demo', name: 'Demo Client', email: '' }); save();

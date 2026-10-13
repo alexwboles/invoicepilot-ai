@@ -43,6 +43,14 @@
     <div class="cards" id="dashCards"></div>
     <h3>Aging — unpaid invoices</h3>
     <div id="agingList" class="tablewrap"></div>
+    <h3>Tax summary</h3>
+    <div class="panel">
+      <div class="row">
+        <label>Year <input type="number" id="taxYear" min="2000" max="2100" style="width:110px"></label>
+        <button id="taxGo" class="ghost">Show</button>
+      </div>
+      <div id="taxTable" class="tablewrap"></div>
+    </div>
   </section>
 
   <!-- NEW INVOICE -->
@@ -67,9 +75,10 @@
           <label title="Simple interest charged on the unpaid balance per 30 days overdue">Late fee %/mo <input type="number" id="fLate" value="0" min="0" max="100" step="0.5"></label>
         </div>
         <label>Notes <input id="fNotes" placeholder="e.g. Payment due within 14 days"></label>
+        <label class="checkline"><input type="checkbox" id="fEstimate"> This is an estimate (quote) — not a bill</label>
         <div id="formErr" class="err"></div>
         <div class="row">
-          <button id="saveInv" class="primary">Save invoice</button>
+          <button id="saveInv" class="primary">Save</button>
           <button id="printInv" class="ghost">Print / PDF</button>
         </div>
       </div>
@@ -87,6 +96,7 @@
         <option value="outstanding">Outstanding</option>
         <option value="overdue">Overdue</option>
         <option value="paid">Paid</option>
+        <option value="estimate">Estimates</option>
       </select>
       <input id="invSearch" type="search" placeholder="Search number or client…" aria-label="Search invoices" style="max-width:280px">
       <button id="exportInvCsv" class="ghost">Export CSV</button>
@@ -130,6 +140,7 @@
       </div>
     </div>
     <div id="clientList" class="tablewrap"></div>
+    <div id="stmtPanel" class="panel invoice-preview" style="display:none"></div>
     <h2>Settings</h2>
     <div class="panel">
       <label>Your business name <input id="sBiz" placeholder="e.g. Alex's Plumbing"></label>

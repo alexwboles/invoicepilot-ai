@@ -164,6 +164,48 @@ if(next.status!=='unpaid'||L.balanceDue(next)!==800) throw new Error('fresh bala
 if(next.recurring!=='monthly') throw new Error('cadence tag');
 " && ok "flow12: monthly retainer clones forward with fresh balance" || bad "flow12: recurring"
 
+# Flow 13: estimate lifecycle — quote, convert, retire, dashboard ignores quotes
+node -e "
+const L=require('$D/lib/logic.js');
+const est={id:'e1',kind:'estimate',status:'estimate',number:'EST-0042',clientName:'Ann',clientId:'c1',
+  businessName:'Biz',issueDate:'2026-10-01',dueDate:'2026-10-31',
+  items:[{desc:'Deck rebuild',qty:1,rate:1200}],discountPct:0,taxPct:8,lateFeePct:0,notes:'',payments:[]};
+if(L.validate(est).length) throw new Error('valid estimate rejected');
+if(L.statusOf(est)!=='estimate') throw new Error('status');
+const invoices=[est];
+if(L.dashboard(invoices).count!==0) throw new Error('quote counted in dashboard');
+const inv=L.convertEstimate(est,'INV-0043','2026-10-13');
+est.status='converted';
+invoices.push(inv);
+if(L.statusOf(est)!=='converted') throw new Error('retire');
+if(inv.number!=='INV-0043'||inv.dueDate!=='2026-11-12') throw new Error('convert dates '+inv.dueDate);
+if(L.totals(inv).total!==1296) throw new Error('total');
+const d=L.dashboard(invoices);
+if(d.count!==1||d.outstanding!==1296) throw new Error('dashboard '+JSON.stringify(d));
+" && ok "flow13: estimate converts to invoice, quote retired from receivables" || bad "flow13: estimates"
+
+# Flow 14: tax summary + client statement across quarters
+node -e "
+const L=require('$D/lib/logic.js');
+function inv(n,client,issue,tax,pay){var i={number:n,kind:'invoice',status:'unpaid',clientName:client,clientId:client,
+  issueDate:issue,dueDate:issue,items:[{desc:'Work',qty:1,rate:1000}],discountPct:0,taxPct:tax,payments:[]};
+  if(pay) L.addPayment(i,pay,issue); return i;}
+const invs=[inv('INV-1','Ann','2026-01-15',10,1100),inv('INV-2','Ann','2026-04-20',10,0),inv('INV-3','Bob','2026-07-05',0,1000)];
+const ts=L.taxSummary(invs,2026);
+if(ts.quarters[0].taxBilled!==100||Math.abs(ts.quarters[0].taxCollected-100)>0.01) throw new Error('q1 tax');
+if(ts.quarters[1].invoiced!==1100||ts.quarters[1].taxCollected!==0) throw new Error('q2 unpaid');
+if(ts.quarters[2].taxBilled!==0) throw new Error('q3 no tax');
+if(ts.total.invoiced!==3200||ts.total.collected!==2100) throw new Error('totals');
+const st=L.clientStatement(invs,'Ann');
+if(st.lines.length!==2||st.totalBilled!==2200||st.totalPaid!==1100||st.balance!==1100) throw new Error('statement');
+if(st.lines[0].number!=='INV-1') throw new Error('sorted by issue date');
+" && ok "flow14: quarterly tax summary + client statement totals" || bad "flow14: tax/statement"
+
+# Flow 15: new UI surfaces over HTTP
+curl -sf "$BASE/" | grep -q 'id="fEstimate"' && ok "flow15: estimate checkbox served" || bad "flow15: estimate checkbox"
+curl -sf "$BASE/" | grep -q 'id="taxTable"' && ok "flow15b: tax panel served" || bad "flow15b: tax panel"
+curl -sf "$BASE/" | grep -q 'id="stmtPanel"' && ok "flow15c: statement panel served" || bad "flow15c: statement panel"
+
 kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
 echo "--- e2e: $PASS passed, $FAIL failed ---"
 exit $((FAIL>0))

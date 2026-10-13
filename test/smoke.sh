@@ -1,5 +1,5 @@
 #!/bin/bash
-# invoicepilot-ai smoke tests — 10 checks
+# invoicepilot-ai smoke tests
 set -u
 D="$(cd "$(dirname "$0")/.." && pwd)"
 PASS=0; FAIL=0
@@ -107,7 +107,7 @@ const invs=[{number:'INV-1',clientName:'Acme, Inc',issueDate:'2026-09-01',dueDat
   items:[{qty:1,rate:200}],status:'unpaid',payments:[{amount:50,date:'2026-09-02'}]}];
 const csv=L.invoicesToCSV(invs);
 const lines=csv.split('\n');
-if(!/^Number,Client,Issue date/.test(lines[0])) throw new Error('header: '+lines[0]);
+if(!/^Number,Kind,Client,Issue date/.test(lines[0])) throw new Error('header: '+lines[0]);
 if(!/Paid,Balance,Late fee$/.test(lines[0])) throw new Error('paid/balance/latefee cols');
 if(!/\"Acme, Inc\"/.test(csv)) throw new Error('quoting');
 if(!/,200\.00,50\.00,150\.00,0\.00$/.test(lines[1])) throw new Error('paid/balance/latefee values: '+lines[1]);
@@ -198,6 +198,43 @@ grep -q 'fLate' "$D/public/index.html" \
   && grep -q 'data-recur' "$D/public/js/app.js" && grep -q 'payerProfile' "$D/public/js/app.js" \
   && grep -q 'lateFeesTotal' "$D/public/js/app.js" \
   && ok "UI wires late-fee field, recur button, reliability badges" || bad "UI missing new wiring"
+
+node -e "
+const L=require('$D/lib/logic.js');
+['isEstimate','convertEstimate','taxSummary','clientStatement','quarterOf'].forEach(function(f){
+  if(typeof L[f]!=='function') throw new Error('missing '+f);
+});
+const est={kind:'estimate',status:'estimate',number:'EST-1',clientName:'Ann',clientId:'c1',
+  issueDate:'2026-09-01',dueDate:'2026-09-15',items:[{desc:'Work',qty:1,rate:100}],taxPct:10,discountPct:0};
+if(!L.isEstimate(est)) throw new Error('isEstimate');
+if(L.statusOf(est)!=='estimate') throw new Error('estimate status');
+if(L.dashboard([est]).count!==0) throw new Error('estimates excluded from dashboard');
+const cv=L.convertEstimate(est,'INV-0001','2026-10-01');
+if(cv.kind!=='invoice'||cv.status!=='unpaid'||cv.issueDate!=='2026-10-01') throw new Error('convert kind/date');
+if(cv.dueDate!=='2026-10-15') throw new Error('convert due '+cv.dueDate);
+if(cv.fromEstimate!=='EST-1') throw new Error('fromEstimate');
+const inv={number:'INV-2',clientName:'Ann',clientId:'c1',issueDate:'2026-02-10',dueDate:'2026-02-24',
+  items:[{desc:'Work',qty:1,rate:100}],taxPct:10,discountPct:0,status:'unpaid'};
+L.addPayment(inv,55,'2026-02-12');
+const ts=L.taxSummary([inv,est],2026);
+const q1=ts.quarters[0];
+if(q1.invoiced!==110||q1.taxBilled!==10) throw new Error('tax billed '+JSON.stringify(q1));
+if(q1.collected!==55||Math.abs(q1.taxCollected-5)>0.01) throw new Error('tax collected '+JSON.stringify(q1));
+if(ts.quarters[1].invoiced!==0) throw new Error('q2 should be empty');
+const st=L.clientStatement([inv,est],'c1');
+if(st.lines.length!==1||st.totalBilled!==110||st.totalPaid!==55||st.balance!==55) throw new Error('statement '+JSON.stringify(st));
+const csv=L.invoicesToCSV([inv,est]);
+if(csv.split('\n')[0].indexOf('Kind')===-1) throw new Error('csv kind column');
+console.log('est/tax/statement ok');
+" && ok "estimates convert, taxSummary, clientStatement, CSV kind" || bad "new logic exports"
+
+grep -q 'id="fEstimate"' "$D/public/index.html" \
+  && grep -q 'id="taxTable"' "$D/public/index.html" \
+  && grep -q 'id="stmtPanel"' "$D/public/index.html" \
+  && grep -q 'data-convert' "$D/public/js/app.js" \
+  && grep -q 'renderTax' "$D/public/js/app.js" \
+  && grep -q 'renderStatement' "$D/public/js/app.js" \
+  && ok "UI wires estimate checkbox, tax panel, statement panel" || bad "UI missing new wiring"
 
 echo "--- smoke: $PASS passed, $FAIL failed ---"
 exit $((FAIL>0))

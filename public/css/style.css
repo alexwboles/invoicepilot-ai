@@ -231,3 +231,10 @@ footer { text-align: center; padding: 26px 20px; border-top: 1px solid var(--lin
 .pill.pay-usually-late { background: #fef3c7; color: #b45309; }
 .pill.pay-slow { background: var(--red-soft); color: var(--red); }
 .pill.recur { background: var(--navy-soft); color: var(--navy); text-transform: none; letter-spacing: 0; }
+
+/* estimate / converted pills, tax totals, statement */
+.pill.estimate { background: #f3e8ff; color: #6d28d9; }
+.pill.converted { background: #e0e7ff; color: #3730a3; }
+.checkline { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 10px 0; }
+.checkline input { width: auto; }
+.totalrow td { border-top: 2px solid var(--ink); }
