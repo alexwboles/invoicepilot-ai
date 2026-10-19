@@ -257,6 +257,53 @@ curl -sf "$BASE/" | grep -q 'id="fcChart"' && ok "flow18b: forecast chart panel 
 curl -sf "$BASE/" | grep -q 'id="fcBillAdd"' && ok "flow18c: bill form served" || bad "flow18c: bill form"
 curl -sf "$BASE/lib/forecast.js" | grep -q "invoicesToCashIn" && ok "flow18d: forecast engine served" || bad "flow18d: engine"
 
+# Flow 19: payment terms journey — preset sets due date, stored + cloned
+node -e "
+const L=require('$D/lib/logic.js');
+let invoices=[];
+const inv={number:L.nextNumber(invoices),clientName:'Terms Client',clientId:'c1',
+  issueDate:'2026-10-19',dueDate:L.dueDateForTerms('2026-10-19','net30'),terms:'net30',
+  items:[{desc:'Retainer',qty:1,rate:1000}],discountPct:0,taxPct:0,status:'unpaid'};
+if(inv.dueDate!=='2026-11-18') throw new Error('net30 due date: '+inv.dueDate);
+if(L.validate(inv).length) throw new Error('terms invoice should validate');
+invoices.push(inv);
+const dupe=L.cloneInvoice(inv,L.nextNumber(invoices));
+if(dupe.terms!=='net30') throw new Error('duplicate must keep terms');
+const rc=L.recurringClone(inv,'monthly',L.nextNumber(invoices));
+if(rc.terms!=='net30') throw new Error('recurring clone must keep terms');
+if(rc.dueDate!=='2026-12-18') throw new Error('recurring due: '+rc.dueDate);
+" && ok "flow19: payment terms (net30 due date, stored, carried by duplicate/recur)" || bad "flow19: payment terms"
+
+# Flow 20: follow-up queue logic — pre-due heads-up, escalation, aging CSV, buffer
+node -e "
+const L=require('$D/lib/logic.js'), F=require('$D/lib/forecast.js');
+function isoPlus(d){var x=new Date();x.setDate(x.getDate()+d);return x.toISOString().slice(0,10);}
+const mk=(n,days,status,terms)=>({id:'x'+n,number:n,clientName:'C',clientId:'c1',businessName:'B',
+  issueDate:isoPlus(-60),dueDate:isoPlus(days),items:[{qty:1,rate:500}],status,payments:[],terms:terms||''});
+// escalation mapping mirrors app.js suggestedTone: <=7 gentle, <=30 firm, >30 final
+const tones={};
+[[3,'gentle'],[7,'gentle'],[8,'firm'],[30,'firm'],[31,'final'],[90,'final']].forEach(function(pair){
+  const d=pair[0]; const t=d<=7?'gentle':d<=30?'firm':'final';
+  if(t!==pair[1]) throw new Error('escalation for '+d+'d');
+});
+const od=mk('INV-1',-40,'unpaid');
+const soon=mk('INV-2',4,'unpaid');
+const pd=L.predueDraft(soon,{name:'Client Co'});
+if(pd.tone!=='predue'||!pd.body.includes('INV-2')) throw new Error('predue draft');
+const gd=L.dunningDraft(od,{name:'Client Co'},'firm');
+if(!/\d+ days overdue/.test(gd.body)) throw new Error('firm draft days: '+gd.body.slice(0,120));
+const csv=L.agingToCSV([od,soon,mk('INV-3',-10,'paid')]);
+if(csv.split('\n').length!==3) throw new Error('aging csv rows: '+csv);
+const buf=F.bufferWeeks([{id:'b',kind:'out',desc:'Rent',date:isoPlus(3),amount:2000,recurring:'monthly'}],500,13);
+if(!(buf>=0&&buf<13)) throw new Error('buffer: '+buf);
+" && ok "flow20: queue (pre-due draft, escalation, aging CSV, buffer)" || bad "flow20: queue logic"
+
+# Flow 21: v2 UI served over HTTP
+curl -sf "$BASE/" | grep -q 'id=\"fTerms\"' && ok "flow21: terms select served" || bad "flow21: terms"
+curl -sf "$BASE/" | grep -q 'id=\"qOverdue\"' && ok "flow21b: follow-up queue served" || bad "flow21b: queue"
+curl -sf "$BASE/" | grep -q 'id=\"fcHeadline\"' && ok "flow21c: forecast headline strip served" || bad "flow21c: headline"
+curl -sf "$BASE/css/style.css" | grep -q '\.detailrow' && ok "flow21d: detail-row styles served" || bad "flow21d: styles"
+
 kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
 echo "--- e2e: $PASS passed, $FAIL failed ---"
 exit $((FAIL>0))

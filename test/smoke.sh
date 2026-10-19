@@ -304,5 +304,111 @@ grep -q 'dangerzone' "$D/public/css/style.css" \
   && grep -q 'autofed' "$D/public/css/style.css" \
   && ok "style.css has forecast chart + scenario styles" || bad "style.css missing forecast styles"
 
-echo "--- smoke: $PASS passed, $FAIL failed ---"
+# v2: payment terms presets, pre-due drafts, aging CSV, payment stats, cash buffer
+node -e "
+const L=require('$D/lib/logic.js');
+if(typeof L.dueDateForTerms!=='function') throw new Error('missing dueDateForTerms');
+if(typeof L.predueDraft!=='function') throw new Error('missing predueDraft');
+if(typeof L.agingToCSV!=='function') throw new Error('missing agingToCSV');
+if(typeof L.paymentStats!=='function') throw new Error('missing paymentStats');
+['receipt','net7','net14','net30','net60'].forEach(function(k){ if(!(L.TERMS[k]>=0)) throw new Error('TERM '+k); });
+if(L.dueDateForTerms('2026-10-19','net14')!=='2026-11-02') throw new Error('net14 math');
+if(L.dueDateForTerms('2026-10-19','net30')!=='2026-11-18') throw new Error('net30 math');
+if(L.dueDateForTerms('2026-10-19','receipt')!=='2026-10-19') throw new Error('receipt');
+if(L.dueDateForTerms('2026-01-31','net7')!=='2026-02-07') throw new Error('month rollover');
+if(L.dueDateForTerms('nope','net14')!=='') throw new Error('bad date must be empty');
+if(L.dueDateForTerms('2026-10-19','bogus')!=='') throw new Error('bad terms must be empty');
+if(!L.TERM_LABELS.net14) throw new Error('TERM_LABELS');
+const c=L.cloneInvoice({number:'INV-1',clientName:'C',businessName:'B',issueDate:'2026-10-01',dueDate:'2026-10-15',
+  items:[{desc:'x',qty:1,rate:10}],terms:'net30',status:'unpaid'},'INV-2');
+if(c.terms!=='net30') throw new Error('cloneInvoice must carry terms');
+" && ok "terms: dueDateForTerms math, TERMS table, cloneInvoice carries terms" || bad "terms"
+
+node -e "
+const L=require('$D/lib/logic.js');
+const inv={number:'INV-0007',clientName:'Jane Doe',dueDate:'2026-11-02',
+  items:[{qty:1,rate:500}],businessName:'ACME',status:'unpaid'};
+const d=L.predueDraft(inv,{name:'Jane Doe'});
+if(d.tone!=='predue') throw new Error('tone');
+if(!d.subject.includes('INV-0007')||!d.subject.includes('2026-11-02')) throw new Error('subject facts');
+if(!d.body.includes('$' + '500.00')||!/heads-up/i.test(d.body)) throw new Error('body');
+if(/overdue/i.test(d.body)) throw new Error('pre-due draft must not say overdue');
+" && ok "predueDraft: friendly heads-up before the due date" || bad "predueDraft"
+
+node -e "
+const L=require('$D/lib/logic.js');
+function isoPlus(d){var x=new Date();x.setDate(x.getDate()+d);return x.toISOString().slice(0,10);}
+const invs=[
+ {number:'INV-1',clientName:'Acme',issueDate:'2026-09-01',dueDate:isoPlus(-40),items:[{qty:1,rate:1000}],status:'unpaid',payments:[{amount:250,date:isoPlus(-30)}]},
+ {number:'INV-2',clientName:'Beta',issueDate:'2026-09-01',dueDate:isoPlus(5),items:[{qty:1,rate:400}],status:'unpaid',payments:[]},
+ {number:'INV-3',clientName:'Paid Co',issueDate:'2026-09-01',dueDate:isoPlus(-40),items:[{qty:1,rate:300}],status:'paid',payments:[{amount:300,date:isoPlus(-30)}]},
+ {number:'EST-1',kind:'estimate',status:'estimate',clientName:'Q',issueDate:'2026-09-01',dueDate:isoPlus(5),items:[{qty:1,rate:900}],payments:[]}
+];
+const csv=L.agingToCSV(invs);
+const lines=csv.split('\n');
+if(lines.length!==3) throw new Error('want header + 2 unpaid rows, got '+lines.length);
+if(!/^Number,Client,Due date,Aging,Total,Paid,Balance$/.test(lines[0])) throw new Error('header: '+lines[0]);
+if(!/,31-60 days,1000\.00,250\.00,750\.00$/.test(lines[1])) throw new Error('aging row: '+lines[1]);
+if(!/,current,400\.00,0\.00,400\.00$/.test(lines[2])) throw new Error('current row: '+lines[2]);
+if(/Paid Co|EST-1/.test(csv)) throw new Error('paid + estimates must be excluded');
+" && ok "agingToCSV: header, buckets, balances, paid/estimates excluded" || bad "agingToCSV"
+
+node -e "
+const L=require('$D/lib/logic.js');
+if(L.paymentStats([]).avgDaysToPay!==null) throw new Error('empty must be null');
+const invs=[
+ {number:'A',clientName:'C',issueDate:'2026-01-01',dueDate:'2026-01-15',items:[{qty:1,rate:100}],status:'paid',payments:[{amount:100,date:'2026-01-11'}]},
+ {number:'B',clientName:'C',issueDate:'2026-02-01',dueDate:'2026-02-15',items:[{qty:1,rate:200}],status:'paid',payments:[{amount:200,date:'2026-02-25'}]},
+ {number:'C',clientName:'C',issueDate:'2026-03-01',dueDate:'2026-03-15',items:[{qty:1,rate:300}],status:'unpaid',payments:[]},
+ {number:'E',kind:'estimate',status:'estimate',clientName:'C',issueDate:'2026-03-01',dueDate:'2026-03-15',items:[{qty:1,rate:300}],payments:[]}
+];
+const ps=L.paymentStats(invs);
+if(ps.paidCount!==2) throw new Error('paidCount '+ps.paidCount);
+if(ps.collected!==300) throw new Error('collected '+ps.collected);
+if(ps.avgDaysToPay!==17) throw new Error('avg should be (10+24)/2=17, got '+ps.avgDaysToPay);
+" && ok "paymentStats: avg days to pay across paid invoices" || bad "paymentStats"
+
+node -e "
+const F=require('$D/lib/forecast.js');
+if(typeof F.bufferWeeks!=='function') throw new Error('missing bufferWeeks');
+function isoPlus(d){var x=new Date();x.setDate(x.getDate()+d);return x.toISOString().slice(0,10);}
+const items=[
+ {id:'b1',kind:'out',desc:'Payroll',date:isoPlus(2),amount:1000,recurring:'monthly'},
+ {id:'inv-1',kind:'in',desc:'INV-0001',date:isoPlus(10),amount:5000}
+];
+const buf=F.bufferWeeks(items,1500,13);
+if(!(buf>=0&&buf<=13)) throw new Error('buffer should drain in horizon, got '+buf);
+if(F.bufferWeeks([],5000,13)!==Infinity) throw new Error('no outflows -> Infinity');
+const onlyIn=[{id:'i1',kind:'in',desc:'x',date:isoPlus(10),amount:100}];
+if(F.bufferWeeks(onlyIn,100,13)!==Infinity) throw new Error('inflows must not count');
+" && ok "bufferWeeks: drains on outflows only, Infinity when safe" || bad "bufferWeeks"
+
+# v2 UI wiring: terms select, queue, expanders, headline, export buttons
+grep -q 'id="fTerms"' "$D/public/index.html" \
+  && grep -q 'id="qOverdue"' "$D/public/index.html" \
+  && grep -q 'id="qDueSoon"' "$D/public/index.html" \
+  && grep -q 'id="markSent"' "$D/public/index.html" \
+  && grep -q 'id="exportAgingCsv"' "$D/public/index.html" \
+  && grep -q 'id="fcHeadline"' "$D/public/index.html" \
+  && ok "index.html has terms select, follow-up queue, headline strip, aging export" || bad "index.html missing v2 controls"
+grep -q 'data-expand' "$D/public/js/app.js" \
+  && grep -q 'invDetail' "$D/public/js/app.js" \
+  && grep -q 'predueDraft' "$D/public/js/app.js" \
+  && grep -q 'dueSoonInvs' "$D/public/js/app.js" \
+  && grep -q 'suggestedTone' "$D/public/js/app.js" \
+  && grep -q 'agingToCSV' "$D/public/js/app.js" \
+  && grep -q 'paymentStats' "$D/public/js/app.js" \
+  && grep -q 'bufferWeeks' "$D/public/js/app.js" \
+  && grep -q 'dueDateForTerms' "$D/public/js/app.js" \
+  && grep -q 'applyTerms' "$D/public/js/app.js" \
+  && ok "app.js wires v2 features (terms, queue, expanders, headline, aging CSV)" || bad "app.js missing v2 wiring"
+grep -q '\.expander' "$D/public/css/style.css" \
+  && grep -q '\.detailrow' "$D/public/css/style.css" \
+  && grep -q '\.headline' "$D/public/css/style.css" \
+  && grep -q '\.empty' "$D/public/css/style.css" \
+  && grep -q '\.bal-area' "$D/public/css/style.css" \
+  && grep -q 'border-radius' "$D/public/css/style.css" \
+  && bad "style.css must have no border-radius" || ok "style.css has v2 styles, zero border-radius"
+
+echo \"--- smoke: $PASS passed, $FAIL failed ---\"
 exit $((FAIL>0))

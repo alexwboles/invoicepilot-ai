@@ -43,7 +43,10 @@
     </div>
     <div class="cards" id="dashCards"></div>
     <div id="overdueCallout"></div>
-    <h3>Aging — unpaid invoices</h3>
+    <div class="secthead">
+      <h3>Aging — unpaid invoices</h3>
+      <button id="exportAgingCsv" class="ghost smallbtn">Export CSV</button>
+    </div>
     <div id="agingList" class="tablewrap"></div>
     <h3>Tax summary</h3>
     <div class="panel">
@@ -66,6 +69,13 @@
         </label>
         <div class="row">
           <label>Issue date <input type="date" id="fIssue"></label>
+          <label>Payment terms <select id="fTerms" aria-label="Payment terms">
+            <option value="net14">Net 14</option>
+            <option value="receipt">Due on receipt</option>
+            <option value="net7">Net 7</option>
+            <option value="net30">Net 30</option>
+            <option value="net60">Net 60</option>
+          </select></label>
           <label>Due date <input type="date" id="fDue"></label>
         </div>
         <h3>Line items</h3>
@@ -118,6 +128,7 @@
         <button id="fcExport" class="ghost">Export forecast CSV</button>
       </div>
       <div id="fcAlerts"></div>
+      <div id="fcHeadline" class="headline"></div>
       <div id="fcChart" class="chartwrap"></div>
       <div id="fcStats" class="cards"></div>
     </div>
@@ -160,18 +171,25 @@
   <section id="tab-remind" class="tab">
     <p class="eyebrow">Collections</p>
     <h2>Smart payment reminders</h2>
-    <p class="muted">Pick an overdue invoice — InvoicePilot drafts the nudge in 3 tones. Copy, paste, get paid.</p>
-    <label>Overdue invoice <select id="rInv"></select></label>
-    <div class="row tones">
-      <button data-tone="gentle" class="tone active">Gentle</button>
-      <button data-tone="firm" class="tone">Firm</button>
-      <button data-tone="final" class="tone">Final notice</button>
-    </div>
+    <p class="muted">FreshBooks-style follow-up: friendly heads-ups <em>before</em> the due date,
+    then an escalating cadence — gentle, firm, final — once an invoice is late.
+    Open a draft, copy it, or log it as sent.</p>
+    <h3>Overdue — needs chasing</h3>
+    <div id="qOverdue" class="tablewrap"></div>
+    <h3>Due soon — friendly heads-up</h3>
+    <div id="qDueSoon" class="tablewrap"></div>
+    <h3>Draft</h3>
     <div class="panel draftcard">
+      <div class="row tones">
+        <button data-tone="gentle" class="tone active">Gentle</button>
+        <button data-tone="firm" class="tone">Firm</button>
+        <button data-tone="final" class="tone">Final notice</button>
+      </div>
       <strong id="rSubject"></strong>
       <pre id="rBody"></pre>
       <div class="row">
         <button id="copyDraft" class="primary">Copy draft</button>
+        <button id="markSent" class="ghost">Mark sent</button>
         <button id="polishDraft" class="ghost">Polish with AI</button>
         <span id="polishNote" class="muted"></span>
       </div>
