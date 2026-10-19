@@ -260,6 +260,56 @@ footer { text-align: center; padding: 26px 20px; border-top: 1px solid var(--lin
   .topbar-inner { flex-direction: column; align-items: flex-start; }
 }
 
+/* ---------- forecast tab (merged in from cashflow-ai) ---------- */
+.chartwrap { margin: 12px 0 6px; }
+.chartwrap svg.chart { width: 100%; height: auto; display: block; background: #fff; border: 1px solid var(--line-soft); }
+.chart .dangerzone { fill: var(--red-soft); opacity: .5; }
+.chart .shortband { fill: var(--red-soft); opacity: .65; }
+.chart .grid { stroke: var(--line-soft); stroke-width: 1; }
+.chart .axis { font-size: 10px; fill: var(--muted); font-family: var(--sans); }
+.chart .bar-in { fill: var(--green); opacity: .85; }
+.chart .bar-out { fill: var(--navy); opacity: .45; }
+.chart .bal-line { stroke: var(--navy); stroke-width: 2.5; }
+.chart .scn-line { stroke-width: 2; }
+.chart .zero { stroke: var(--ink-soft); stroke-width: 1.5; }
+.chart .wk-hit { fill: transparent; }
+.legend { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--ink-soft); margin: 10px 0 0; }
+.legend .sw { display: inline-block; width: 14px; height: 10px; margin-right: 6px; vertical-align: baseline; }
+.sw.in { background: var(--green); }
+.sw.out { background: var(--navy); opacity: .45; }
+.sw.bal { background: transparent; border-bottom: 3px solid var(--navy); height: 0; width: 18px; }
+.sw.scnsw { background: transparent; border-bottom: 2px dashed; height: 0; width: 18px; }
+.alert { padding: 12px 16px; margin: 12px 0; font-size: 14px; border: 1px solid var(--line); }
+.alert.crit { background: var(--red-soft); border-left: 6px solid var(--red); }
+.alert.warn { background: var(--amber-soft); border-left: 6px solid var(--amber); }
+.alert.ok { background: var(--green-soft); border-left: 6px solid var(--green); }
+.autofed {
+  display: inline-block; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;
+  background: var(--navy-soft); color: var(--navy); padding: 2px 8px; margin-left: 6px;
+}
+.wk-item { display: inline-block; font-size: 12.5px; margin: 2px 8px 2px 0; padding: 2px 8px; background: var(--line-soft); }
+.wk-item.in { background: var(--green-soft); color: var(--green); font-weight: 600; }
+.wk-item.out { background: var(--navy-soft); color: var(--navy); font-weight: 600; }
+tr.wk-crit td { background: var(--red-soft); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.num.in { color: var(--green); font-weight: 600; }
+td.num.out { color: var(--navy); font-weight: 600; }
+td.bad, .num.bad { color: var(--red); font-weight: 700; }
+td.good, .num.good { color: var(--green); font-weight: 700; }
+.scntabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 14px; }
+.scn-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--line); background: var(--card); padding: 9px 16px;
+  font-size: 13.5px; font-weight: 600; color: var(--ink-soft);
+}
+.scn-chip.active { border-color: var(--navy); color: var(--navy); background: var(--navy-soft); }
+.scn-dot { display: inline-block; width: 10px; height: 10px; }
+.shift-row {
+  display: flex; align-items: center; gap: 14px; padding: 8px 0;
+  border-bottom: 1px solid var(--line-soft); font-size: 14px;
+}
+.shift-row .shift-w { font-weight: 800; font-variant-numeric: tabular-nums; }
+
 /* ---------- print: the invoice document ---------- */
 @media print {
   .topbar, #tabs, footer, #toast, .grid2 > .panel:first-child,

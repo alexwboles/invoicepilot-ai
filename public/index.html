@@ -17,6 +17,7 @@
       <button data-tab="dash" class="active">Dashboard</button>
       <button data-tab="new">New Invoice</button>
       <button data-tab="invoices">Invoices</button>
+      <button data-tab="forecast">Forecast</button>
       <button data-tab="remind">Reminders</button>
       <button data-tab="clients">Clients</button>
     </nav>
@@ -105,6 +106,56 @@
     <div id="invList" class="tablewrap"></div>
   </section>
 
+  <!-- FORECAST -->
+  <section id="tab-forecast" class="tab">
+    <p class="eyebrow">Forward look</p>
+    <h2>13-week cash forecast</h2>
+    <p class="muted">Money in is fed automatically from your outstanding invoices — no re-typing. Add your expected bills below and InvoicePilot projects every week.</p>
+    <div class="panel">
+      <div class="row">
+        <label>Starting balance <input type="text" id="fcStartBal" inputmode="decimal" style="max-width:180px"></label>
+        <label>Low-cash alert level <input type="text" id="fcWarnAt" inputmode="decimal" style="max-width:180px"></label>
+        <button id="fcExport" class="ghost">Export forecast CSV</button>
+      </div>
+      <div id="fcAlerts"></div>
+      <div id="fcChart" class="chartwrap"></div>
+      <div id="fcStats" class="cards"></div>
+    </div>
+    <h3>Scenario desk — what if a client pays late?</h3>
+    <div class="panel">
+      <p class="muted small">Name a scenario, stack one or more shifted payments inside it, and compare every scenario against the base forecast. Positive weeks push a payment later; negative pulls it earlier.</p>
+      <div id="fcScnTabs" class="scntabs"></div>
+      <div id="fcScnEditor"></div>
+      <h3 style="margin-top:18px">Scenario comparison</h3>
+      <div id="fcScnCmp" class="tablewrap"></div>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <h3>Expected money in — auto-fed from invoices</h3>
+        <div id="fcInList" class="tablewrap"></div>
+      </div>
+      <div class="panel">
+        <h3>Expected money out — your bills</h3>
+        <div class="row">
+          <label>Description <input id="fcBillDesc" placeholder="e.g. Rent, payroll"></label>
+          <label>Date <input type="date" id="fcBillDate"></label>
+          <label>Amount <input id="fcBillAmt" inputmode="decimal" placeholder="0.00"></label>
+          <label>Repeat <select id="fcBillRec">
+            <option value="">One-time</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="yearly">Yearly</option>
+          </select></label>
+          <button id="fcBillAdd" class="primary">Add bill</button>
+        </div>
+        <div id="fcOutList" class="tablewrap"></div>
+      </div>
+    </div>
+    <h3>Weekly breakdown</h3>
+    <div id="fcWeeks" class="tablewrap"></div>
+  </section>
+
   <!-- REMINDERS -->
   <section id="tab-remind" class="tab">
     <p class="eyebrow">Collections</p>
@@ -156,6 +207,7 @@
 
 <div id="toast"></div>
 <script src="/lib/logic.js"></script>
+<script src="/lib/forecast.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

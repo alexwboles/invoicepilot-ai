@@ -221,7 +221,7 @@
     inv.id = 'i' + Date.now();
     inv.payments = [];
     S.invoices.push(inv); save();
-    resetForm(); renderDashboard(); renderInvoices(); renderReminders();
+    resetForm(); renderDashboard(); renderInvoices(); renderReminders(); renderForecast();
     toast((L.isEstimate(inv) ? 'Estimate ' : 'Invoice ') + inv.number + ' saved');
   });
   $('printInv').addEventListener('click', function () { renderPreview(); window.print(); });
@@ -349,7 +349,7 @@
     document.querySelectorAll('[data-paid]').forEach(function (b) {
       b.addEventListener('click', function () {
         var inv = S.invoices.find(function (x) { return x.id === b.dataset.paid; });
-        if (inv) { inv.status = 'paid'; save(); renderDashboard(); renderInvoices(); renderReminders(); renderClients(); toast('Marked paid'); }
+        if (inv) { inv.status = 'paid'; save(); renderDashboard(); renderInvoices(); renderReminders(); renderClients(); renderForecast(); toast('Marked paid'); }
       });
     });
     document.querySelectorAll('[data-pay]').forEach(function (b) {
@@ -360,7 +360,7 @@
         if (raw === null) return;
         var r = L.addPayment(inv, raw);
         if (!r.ok) { toast(r.error); return; }
-        save(); renderDashboard(); renderInvoices(); renderReminders(); renderClients();
+        save(); renderDashboard(); renderInvoices(); renderReminders(); renderClients(); renderForecast();
         toast('Payment recorded — balance ' + L.money(r.balance));
       });
     });
@@ -370,7 +370,7 @@
         if (!inv) return;
         var copy = L.cloneInvoice(inv, L.nextNumber(S.invoices));
         S.invoices.push(copy); save();
-        renderDashboard(); renderInvoices(); renderReminders();
+        renderDashboard(); renderInvoices(); renderReminders(); renderForecast();
         toast('Duplicated as ' + copy.number);
       });
     });
@@ -383,7 +383,7 @@
         if (!L.CADENCES[cad]) { toast('Cadence must be monthly, quarterly, or yearly'); return; }
         var copy = L.recurringClone(inv, cad, L.nextNumber(S.invoices));
         S.invoices.push(copy); save();
-        renderDashboard(); renderInvoices(); renderReminders(); renderClients();
+        renderDashboard(); renderInvoices(); renderReminders(); renderForecast(); renderClients();
         toast('Recurring invoice ' + copy.number + ' created (' + cad + ')');
       });
     });
@@ -394,7 +394,7 @@
         var copy = L.convertEstimate(inv, L.nextNumber(S.invoices), todayStr());
         inv.status = 'converted'; // retire the quote; it stays as the paper trail
         S.invoices.push(copy); save();
-        renderDashboard(); renderInvoices(); renderReminders(); renderClients();
+        renderDashboard(); renderInvoices(); renderReminders(); renderForecast(); renderClients();
         toast('Estimate ' + inv.number + ' converted to invoice ' + copy.number);
       });
     });
@@ -402,7 +402,7 @@
       b.addEventListener('click', function () {
         if (!confirm('Delete this invoice?')) return;
         S.invoices = S.invoices.filter(function (x) { return x.id !== b.dataset.delinv; });
-        save(); renderDashboard(); renderInvoices(); renderReminders();
+        save(); renderDashboard(); renderInvoices(); renderReminders(); renderForecast();
       });
     });
   }
@@ -491,11 +491,296 @@
     }).catch(function () { $('polishNote').textContent = 'Local draft (offline)'; });
   });
 
+  /* ---- 13-week forecast (auto-fed from outstanding invoices) ---- */
+  var F = window.InvoiceForecast;
+  function fcState() {
+    if (!S.forecast || typeof S.forecast !== 'object') S.forecast = {};
+    var fs = S.forecast;
+    if (fs.startBalance == null) fs.startBalance = 0;
+    if (fs.warnAt == null) fs.warnAt = 1000;
+    if (!Array.isArray(fs.bills)) fs.bills = [];
+    if (!Array.isArray(fs.scenarios)) fs.scenarios = [];
+    if (!fs.activeScn) fs.activeScn = fs.scenarios.length ? fs.scenarios[0].id : '';
+    return fs;
+  }
+  function fcItems() {
+    if (!F) return [];
+    return F.invoicesToCashIn(S.invoices, L).concat(fcState().bills);
+  }
+  var SCN_COLORS = ['#8a6d1f', '#a03d2d', '#3d6b8e'];
+  var SCN_DASH = ['7 5', '3 4', '11 4 3 4'];
+  function scnById(id) {
+    var scs = fcState().scenarios;
+    for (var i = 0; i < scs.length; i++) if (scs[i].id === id) return scs[i];
+    return null;
+  }
+  function fcFindItem(id) {
+    var items = fcItems();
+    for (var i = 0; i < items.length; i++) if (items[i].id === id) return items[i];
+    return null;
+  }
+
+  function fcChartSVG(fc, scnFcs) {
+    scnFcs = scnFcs || [];
+    var W = 860, H = 320, padL = 56, padB = 52, padT = 18;
+    var cw = W - padL - 12, ch = H - padT - padB;
+    var maxV = 1000, minV = 0;
+    function swallow(f) { f.forEach(function (w) {
+      maxV = Math.max(maxV, w.inflow, w.outflow, w.balance);
+      minV = Math.min(minV, w.balance);
+    }); }
+    swallow(fc);
+    scnFcs.forEach(function (s) { swallow(s.fc); });
+    var span = (maxV - minV) || 1;
+    function y(v) { return padT + ch - ((v - minV) / span) * ch; }
+    function x(i) { return padL + (i + 0.5) * (cw / fc.length); }
+    var bw = Math.min(20, (cw / fc.length) / 3.6);
+    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="chart" role="img" aria-label="' + fc.length + '-week cash forecast chart">';
+    s += '<rect x="' + padL + '" y="' + y(0).toFixed(1) + '" width="' + cw + '" height="' +
+      (padT + ch - y(0)).toFixed(1) + '" class="dangerzone"/>';
+    [0.25, 0.5, 0.75, 1].forEach(function (f) {
+      var gv = Math.round((minV + span * f) / 500) * 500;
+      var glabel = gv === 0 ? '0' : '$' + (gv / 1000) + 'k';
+      s += '<line x1="' + padL + '" y1="' + y(gv).toFixed(1) + '" x2="' + (W - 12) + '" y2="' + y(gv).toFixed(1) + '" class="grid"/>' +
+        '<text x="' + (padL - 6) + '" y="' + (y(gv) + 4).toFixed(1) + '" class="axis" text-anchor="end">' + glabel + '</text>';
+    });
+    fc.forEach(function (w, i) {
+      var cx = x(i);
+      if (w.balance < 0) s += '<rect x="' + (cx - bw - 7).toFixed(1) + '" y="' + padT + '" width="' + (bw * 2 + 14).toFixed(1) + '" height="' + ch + '" class="shortband"/>';
+      s += '<rect x="' + (cx - bw - 2).toFixed(1) + '" y="' + y(w.inflow).toFixed(1) + '" width="' + bw + '" height="' + Math.max(0, y(0) - y(w.inflow)).toFixed(1) + '" class="bar-in"/>';
+      s += '<rect x="' + (cx + 2).toFixed(1) + '" y="' + y(w.outflow).toFixed(1) + '" width="' + bw + '" height="' + Math.max(0, y(0) - y(w.outflow)).toFixed(1) + '" class="bar-out"/>';
+    });
+    function lineD(f) {
+      return f.map(function (w, i) { return (i ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(w.balance).toFixed(1); }).join(' ');
+    }
+    var baseD = lineD(fc);
+    scnFcs.forEach(function (sf, si) {
+      s += '<path d="' + lineD(sf.fc) + '" class="scn-line" fill="none" stroke="' + esc(sf.scn.color) +
+        '" stroke-dasharray="' + SCN_DASH[si % SCN_DASH.length] + '"/>';
+    });
+    s += '<path d="' + baseD + '" class="bal-line" fill="none"/>';
+    s += '<line x1="' + padL + '" y1="' + y(0).toFixed(1) + '" x2="' + (W - 12) + '" y2="' + y(0).toFixed(1) + '" class="zero"/>';
+    fc.forEach(function (w, i) {
+      var cx = x(i);
+      if (i % 2 === 0) s += '<text x="' + cx.toFixed(1) + '" y="' + (H - 30) + '" class="axis" text-anchor="middle">' + F.fmtWeek(w).split('–')[0] + '</text>';
+      var tip = 'Wk ' + (i + 1) + ' ' + F.fmtWeek(w) + ': in ' + F.money(w.inflow) + ', out ' + F.money(w.outflow) + ', balance ' + F.money(w.balance);
+      scnFcs.forEach(function (sf) { tip += ' | ' + sf.scn.name + ': ' + F.money(sf.fc[i].balance); });
+      s += '<rect x="' + (cx - cw / fc.length / 2).toFixed(1) + '" y="' + padT + '" width="' + (cw / fc.length).toFixed(1) +
+        '" height="' + ch + '" class="wk-hit"><title>' + esc(tip) + '</title></rect>';
+    });
+    return s + '</svg>';
+  }
+
+  function fcRenderAlerts(fc, warnAt) {
+    var sf = F.shortfalls(fc, warnAt);
+    if (!sf.critical.length && !sf.watch.length)
+      return '<div class="alert ok">No shortfalls projected — cash stays positive all ' + fc.length + ' weeks.</div>';
+    var h = '';
+    if (sf.critical.length) {
+      h += '<div class="alert crit"><strong>Cash shortfall projected in ' + sf.critical.length + ' week(s):</strong> ' +
+        sf.critical.map(function (w) { return 'Wk ' + (w.index + 1) + ' (' + F.fmtWeek(w) + ', ' + F.money(w.balance) + ')'; }).join('; ') + '</div>';
+    }
+    if (sf.watch.length) {
+      h += '<div class="alert warn"><strong>Thin cash (under ' + F.money(warnAt) + ') in ' + sf.watch.length + ' week(s):</strong> ' +
+        sf.watch.map(function (w) { return 'Wk ' + (w.index + 1) + ' (' + F.money(w.balance) + ')'; }).join('; ') + '</div>';
+    }
+    return h;
+  }
+
+  function renderForecast() {
+    if (!F) { $('fcChart').innerHTML = '<p class="muted">Forecast engine failed to load.</p>'; return; }
+    var fs = fcState();
+    var items = fcItems();
+    var fc = F.forecast(items, fs.startBalance, 13, {});
+    var scnFcs = fs.scenarios.map(function (sc) {
+      return { scn: sc, fc: F.forecast(items, fs.startBalance, 13, sc.shifts || {}) };
+    });
+    var t = F.totals(fc);
+    var rw = F.runwayWeeks(fc);
+    var rwTxt = rw === Infinity ? '13+ wks' : rw + (rw === 1 ? ' wk' : ' wks');
+
+    $('fcStartBal').value = fs.startBalance;
+    $('fcWarnAt').value = fs.warnAt;
+    $('fcAlerts').innerHTML = fcRenderAlerts(fc, fs.warnAt);
+    $('fcChart').innerHTML = fcChartSVG(fc, scnFcs) +
+      '<p class="legend"><span class="sw in"></span> money in <span class="sw out"></span> money out <span class="sw bal"></span> balance' +
+      fs.scenarios.map(function (sc) { return ' <span class="sw scnsw" style="border-color:' + esc(sc.color) + '"></span> ' + esc(sc.name); }).join('') + '</p>';
+    $('fcStats').innerHTML =
+      stat(F.money(t.totalIn), 'Expected in', '') +
+      stat(F.money(t.totalOut), 'Expected out', '') +
+      stat(F.money(t.endBalance), 'Ending balance', t.endBalance < 0 ? 'bad' : '') +
+      stat(F.money(t.minBalance), 'Lowest week', t.minBalance < 0 ? 'bad' : '') +
+      stat(rwTxt, 'Cash runway', rw === Infinity || rw > 8 ? '' : 'bad');
+
+    // auto-fed money in (read-only — edit the invoice itself)
+    var fed = F.invoicesToCashIn(S.invoices, L).sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    $('fcInList').innerHTML = fed.length
+      ? '<table><tr><th>Due</th><th>Invoice</th><th>Expected</th></tr>' + fed.map(function (it) {
+          return '<tr><td>' + esc(it.date) + '</td><td>' + esc(it.desc) +
+            ' <span class="autofed" title="Fed from your invoice ledger">auto</span></td><td>' + F.money(it.amount) + '</td></tr>';
+        }).join('') + '</table>'
+      : '<p class="muted">No outstanding invoices — save one and it appears here automatically.</p>';
+
+    // bills
+    var bills = fs.bills.slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    $('fcOutList').innerHTML = bills.length
+      ? '<table><tr><th>Due</th><th>Description</th><th>Amount</th><th></th></tr>' + bills.map(function (b) {
+          return '<tr><td>' + esc(b.date) + '</td><td>' + esc(b.desc) +
+            (b.recurring ? ' <span class="autofed">' + esc(b.recurring) + '</span>' : '') +
+            '</td><td>' + F.money(b.amount) + '</td><td><button class="ghost" data-delbill="' + esc(b.id) + '">Delete</button></td></tr>';
+        }).join('') + '</table>'
+      : '<p class="muted">No bills yet — add rent, payroll, suppliers above.</p>';
+    document.querySelectorAll('[data-delbill]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        fs.bills = fs.bills.filter(function (b) { return b.id !== btn.dataset.delbill; });
+        save(); renderForecast(); toast('Bill removed');
+      });
+    });
+
+    // weekly breakdown
+    var rows = fc.map(function (w, i) {
+      var det = w.items.map(function (it) {
+        return '<span class="wk-item ' + it.kind + '">' + (it.kind === 'in' ? '+' : '−') + esc(it.desc) + ' ' + F.money(it.amount) + (it.occurrence > 0 ? ' ↻' : '') + '</span>';
+      }).join(' ');
+      return '<tr' + (w.balance < 0 ? ' class="wk-crit"' : '') + '><td><strong>Wk ' + (i + 1) + '</strong><br><span class="muted small">' +
+        F.fmtWeek(w) + '</span></td><td class="num in">' + F.money(w.inflow) + '</td><td class="num out">' +
+        F.money(w.outflow) + '</td><td class="num">' + F.money(w.net) + '</td><td class="num"><strong>' +
+        F.money(w.balance) + '</strong></td><td>' + (det || '<span class="muted">—</span>') + '</td></tr>';
+    }).join('');
+    $('fcWeeks').innerHTML = '<table><tr><th>Week</th><th class="num">In</th><th class="num">Out</th><th class="num">Net</th><th class="num">Balance</th><th>What\'s in it</th></tr>' + rows + '</table>';
+
+    // scenario desk
+    var tabs = fs.scenarios.map(function (sc) {
+      return '<button class="scn-chip' + (fs.activeScn === sc.id ? ' active' : '') + '" data-scn="' + esc(sc.id) + '">' +
+        '<span class="scn-dot" style="background:' + esc(sc.color) + '"></span>' + esc(sc.name) + '</button>';
+    }).join('');
+    if (fs.scenarios.length < 3) tabs += '<button class="ghost" id="fcScnNew">+ New scenario</button>';
+    $('fcScnTabs').innerHTML = tabs;
+    var active = scnById(fs.activeScn);
+    if (active) {
+      var opts = items.slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; }).map(function (it) {
+        return '<option value="' + esc(it.id) + '">' + (it.kind === 'in' ? '+ ' : '− ') + esc(it.desc) + ' (' + F.money(it.amount) + ')</option>';
+      }).join('');
+      var shifts = Object.keys(active.shifts || {}).map(function (id) {
+        var it = fcFindItem(id), w = active.shifts[id];
+        return '<div class="shift-row"><span>' + esc(it ? it.desc : id) + '</span><span class="shift-w">' +
+          (w > 0 ? '+' : '') + w + ' wk' + (Math.abs(w) === 1 ? '' : 's') + '</span>' +
+          '<button class="ghost" data-rmshift="' + esc(id) + '">Remove</button></div>';
+      }).join('');
+      $('fcScnEditor').innerHTML =
+        '<div class="row"><input id="fcScnName" value="' + esc(active.name) + '" aria-label="Scenario name" maxlength="40" style="max-width:280px"> ' +
+        '<button class="ghost" id="fcScnDel">Delete scenario</button></div>' +
+        '<div>' + (shifts || '<p class="muted small">No shifts yet — stack one or more below.</p>') + '</div>' +
+        '<div class="row"><label>Payment <select id="fcShiftItem">' + opts + '</select></label>' +
+        '<label>Weeks <span id="fcShiftVal">2</span><input type="range" id="fcShiftRange" min="-4" max="6" value="2" style="width:140px"></label> ' +
+        '<button class="ghost" id="fcShiftAdd">Add shift</button></div>';
+    } else {
+      $('fcScnEditor').innerHTML = fs.scenarios.length
+        ? '<p class="muted">Pick a scenario above to edit its shifts.</p>'
+        : '<p class="muted">Example: "Big client pays 3 weeks late" — then stack the shifted payments inside it.</p>';
+    }
+    var tB = F.totals(fc);
+    function cmpRow(name, color, endBal, minBal, critWeeks, minDelta) {
+      var dCls = minDelta == null ? '' : (minDelta < -0.005 ? 'bad' : minDelta > 0.005 ? 'good' : '');
+      var dTxt = minDelta == null ? '—' : (minDelta > 0 ? '+' : '') + F.money(minDelta);
+      return '<tr><td><span class="scn-dot" style="background:' + esc(color) + '"></span><strong>' + esc(name) + '</strong></td>' +
+        '<td class="num">' + F.money(endBal) + '</td><td class="num ' + (minBal < 0 ? 'bad' : '') + '">' + F.money(minBal) + '</td>' +
+        '<td class="num ' + (critWeeks > 0 ? 'bad' : '') + '">' + critWeeks + '</td><td class="num ' + dCls + '">' + dTxt + '</td></tr>';
+    }
+    var cmp = '<table><tr><th>Scenario</th><th class="num">Ending balance</th><th class="num">Lowest week</th>' +
+      '<th class="num">Shortfall wks</th><th class="num">Lowest vs base</th></tr>' +
+      cmpRow('Base', '#1f3a5f', tB.endBalance, tB.minBalance, F.shortfalls(fc, fs.warnAt).critical.length, null);
+    scnFcs.forEach(function (sf) {
+      var d = F.scenarioDiff(fc, sf.fc, fs.warnAt);
+      cmp += cmpRow(sf.scn.name, sf.scn.color, d.scnEnd, d.scnMin, d.scnShortfalls, d.minDelta);
+    });
+    $('fcScnCmp').innerHTML = cmp + '</table>';
+
+    bindForecast();
+  }
+
+  function bindForecast() {
+    var fs = fcState();
+    var scnNew = $('fcScnNew');
+    if (scnNew) {
+      scnNew.addEventListener('click', function () {
+        var n = fs.scenarios.length;
+        var sc = { id: F.newId('scn'), name: 'Scenario ' + 'ABC'[n], shifts: {}, color: SCN_COLORS[n % SCN_COLORS.length] };
+        fs.scenarios.push(sc); fs.activeScn = sc.id; save(); renderForecast();
+      });
+    }
+    document.querySelectorAll('#fcScnTabs .scn-chip').forEach(function (chip) {
+      chip.addEventListener('click', function () { fs.activeScn = chip.dataset.scn; save(); renderForecast(); });
+    });
+    var nm = $('fcScnName');
+    if (nm) nm.addEventListener('change', function () {
+      var sc = scnById(fs.activeScn);
+      if (sc && nm.value.trim()) { sc.name = nm.value.trim().slice(0, 40); save(); renderForecast(); }
+    });
+    var del = $('fcScnDel');
+    if (del) del.addEventListener('click', function () {
+      fs.scenarios = fs.scenarios.filter(function (s) { return s.id !== fs.activeScn; });
+      fs.activeScn = fs.scenarios.length ? fs.scenarios[fs.scenarios.length - 1].id : '';
+      save(); renderForecast();
+    });
+    var rng = $('fcShiftRange');
+    if (rng) rng.addEventListener('input', function () { $('fcShiftVal').textContent = rng.value; });
+    var sadd = $('fcShiftAdd');
+    if (sadd) sadd.addEventListener('click', function () {
+      var sc = scnById(fs.activeScn);
+      var itemId = $('fcShiftItem').value;
+      if (!sc || !itemId) return;
+      sc.shifts = sc.shifts || {};
+      sc.shifts[itemId] = parseInt(rng.value, 10) || 0;
+      save(); renderForecast();
+    });
+    document.querySelectorAll('[data-rmshift]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var sc = scnById(fs.activeScn);
+        if (sc && sc.shifts) { delete sc.shifts[b.dataset.rmshift]; save(); renderForecast(); }
+      });
+    });
+  }
+  $('fcStartBal').addEventListener('change', function (e) {
+    var fs = fcState();
+    var v = F ? F.parseAmount(e.target.value) : null;
+    if (v != null && v >= 0) { fs.startBalance = v; save(); renderForecast(); }
+    else e.target.value = fs.startBalance;
+  });
+  $('fcWarnAt').addEventListener('change', function (e) {
+    var fs = fcState();
+    var v = F ? F.parseAmount(e.target.value) : null;
+    if (v != null && v >= 0) { fs.warnAt = v; save(); renderForecast(); }
+    else e.target.value = fs.warnAt;
+  });
+  $('fcBillAdd').addEventListener('click', function () {
+    var fs = fcState();
+    var desc = $('fcBillDesc').value.trim();
+    var dt = F ? F.parseDate($('fcBillDate').value) : null;
+    var amt = F ? F.parseAmount($('fcBillAmt').value) : null;
+    if (!desc || !dt || amt == null || amt <= 0) { toast('Add a description, valid date, and amount above $0'); return; }
+    fs.bills.push({ id: F.newId('bill'), kind: 'out', desc: desc, date: F.toISODate(dt),
+      amount: Math.round(amt * 100) / 100, recurring: $('fcBillRec').value || '' });
+    $('fcBillDesc').value = ''; $('fcBillDate').value = ''; $('fcBillAmt').value = ''; $('fcBillRec').value = '';
+    save(); renderForecast(); toast('Bill added to forecast');
+  });
+  $('fcExport').addEventListener('click', function () {
+    var fs = fcState();
+    var csv = F.forecastToCSV(F.forecast(fcItems(), fs.startBalance, 13, {}));
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'invoicepilot-forecast.csv';
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+    toast('Forecast exported');
+  });
+
   /* ---- init ---- */
   $('taxGo').addEventListener('click', renderTax);
   if (!S.clients.length && !S.invoices.length) {
     // seed one demo client so the app isn't empty on first run
     S.clients.push({ id: 'c-demo', name: 'Demo Client', email: '' }); save();
   }
-  renderClients(); resetForm(); renderDashboard(); renderInvoices(); renderReminders();
+  renderClients(); resetForm(); renderDashboard(); renderInvoices(); renderReminders(); renderForecast();
 })();

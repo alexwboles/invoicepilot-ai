@@ -7,12 +7,12 @@ ok()  { PASS=$((PASS+1)); echo "PASS: $1"; }
 bad() { FAIL=$((FAIL+1)); echo "FAIL: $1"; }
 
 # 1. required files exist
-for f in README.md server.js lib/logic.js public/index.html public/css/style.css public/js/app.js package.json; do
+for f in README.md server.js lib/logic.js lib/forecast.js public/index.html public/css/style.css public/js/app.js package.json; do
   [ -f "$D/$f" ] && ok "file $f" || bad "file $f missing"
 done
 
 # 2. JS syntax valid
-for f in server.js lib/logic.js public/js/app.js; do
+for f in server.js lib/logic.js lib/forecast.js public/js/app.js; do
   node --check "$D/$f" 2>/dev/null && ok "syntax $f" || bad "syntax $f"
 done
 
@@ -24,6 +24,8 @@ curl -sf "http://localhost:4181/api/health" | grep -q '"ok":true' && ok "health 
 curl -sf "http://localhost:4181/" | grep -q "InvoicePilot" && ok "index.html served" || bad "index.html served"
 # 5. shared logic served
 curl -sf "http://localhost:4181/lib/logic.js" | grep -q "dunningDraft" && ok "/lib/logic.js served" || bad "/lib/logic.js served"
+# 5b. forecast engine served
+curl -sf "http://localhost:4181/lib/forecast.js" | grep -q "invoicesToCashIn" && ok "/lib/forecast.js served" || bad "/lib/forecast.js served"
 # 6. polish without key falls back gracefully
 curl -sf -X POST "http://localhost:4181/api/polish" -H 'Content-Type: application/json' \
   -d '{"text":"hi"}' | grep -q '"enhanced":false' && ok "polish fallback (no key)" || bad "polish fallback (no key)"
@@ -244,6 +246,63 @@ grep -q 'sheet-stamp' "$D/public/js/app.js" \
   && grep -q 'duechip' "$D/public/css/style.css" \
   && grep -q 'callout' "$D/public/css/style.css" \
   && ok "UI wires invoice sheet, due urgency, overdue callout" || bad "UI missing redesign wiring"
+
+# forecast engine: auto-feed, week placement, recurring bills, shortfalls, what-if
+node -e "
+const L=require('$D/lib/logic.js'), F=require('$D/lib/forecast.js');
+if(typeof F.invoicesToCashIn!=='function') throw new Error('missing invoicesToCashIn');
+function isoPlus(d){var x=new Date();x.setDate(x.getDate()+d);return x.toISOString().slice(0,10);}
+const invs=[
+ {id:'i1',number:'INV-0001',clientName:'Acme',clientId:'c1',issueDate:'2026-09-01',dueDate:isoPlus(10),items:[{qty:1,rate:1000}],status:'unpaid',payments:[]},
+ {id:'i2',number:'INV-0002',clientName:'Slow',clientId:'c2',issueDate:'2026-06-01',dueDate:isoPlus(-40),items:[{qty:1,rate:500}],status:'unpaid',payments:[{amount:100,date:isoPlus(-30)}]},
+ {id:'i3',number:'INV-0003',clientName:'Done',clientId:'c3',issueDate:'2026-06-01',dueDate:isoPlus(-40),items:[{qty:1,rate:500}],status:'paid',payments:[{amount:500,date:'2026-06-02'}]},
+ {id:'e1',number:'EST-1',kind:'estimate',status:'estimate',clientName:'Quote',clientId:'c4',issueDate:'2026-10-01',dueDate:isoPlus(10),items:[{qty:1,rate:900}],payments:[]}
+];
+const fed=F.invoicesToCashIn(invs,L);
+if(fed.length!==2) throw new Error('want 2 fed items, got '+fed.length);
+if(!fed.every(function(i){return i.auto&&i.kind==='in';})) throw new Error('auto/kind flags');
+const p2=fed.filter(function(i){return i.invoiceId==='i2';})[0];
+if(!p2||p2.amount!==400) throw new Error('partial payment must shrink fed amount');
+const bills=[{id:'b1',kind:'out',desc:'Rent',date:isoPlus(5),amount:1200,recurring:'monthly'}];
+const fc=F.forecast(fed.concat(bills),5000,13,{});
+if(fc.length!==13) throw new Error('13 weeks');
+if(fc[0].inflow!==400) throw new Error('overdue invoice should land in week 0, got '+fc[0].inflow);
+const outWeeks=fc.filter(function(w){return w.outflow>0;}).length;
+if(outWeeks<2) throw new Error('monthly bill should recur, weeks='+outWeeks);
+var bal=5000, okChain=true;
+fc.forEach(function(w){ if(Math.abs(w.balance-(bal+w.inflow-w.outflow))>0.01) okChain=false; bal=w.balance; });
+if(!okChain) throw new Error('balance chaining');
+var id=fed.filter(function(i){return i.invoiceId==='i1';})[0].id;
+var sm={}; sm[id]=3;
+const sh=F.forecast(fed,5000,13,sm);
+const base=F.forecast(fed,5000,13,{});
+const baseWk=base.map(function(w,i){return w.inflow>0?i:-1;}).filter(function(i){return i>=0;});
+const shWk=sh.map(function(w,i){return w.inflow>0?i:-1;}).filter(function(i){return i>=0;});
+if(JSON.stringify(baseWk)===JSON.stringify(shWk)) throw new Error('what-if shift did nothing');
+const d=F.scenarioDiff(base,sh);
+if(d.newShortfalls!==d.scnShortfalls-d.baseShortfalls||typeof d.minDelta!=='number') throw new Error('scenarioDiff');
+if(F.money(-1234.5)!=='-\$1,234.50') throw new Error('money negative');
+const csv=F.forecastToCSV(fc).split('\r\n');
+if(csv.length!==14||csv[0].indexOf('Balance')===-1) throw new Error('forecastToCSV');
+" && ok "forecast: auto-feed, week0 overdue, recurring bills, what-if, scenarioDiff" || bad "forecast engine"
+
+# forecast UI wiring: tab, panel ids, app.js render, chart CSS
+grep -q 'data-tab="forecast"' "$D/public/index.html" \
+  && grep -q 'id="fcChart"' "$D/public/index.html" \
+  && grep -q 'id="fcBillAdd"' "$D/public/index.html" \
+  && grep -q 'id="tab-forecast"' "$D/public/index.html" \
+  && grep -q '/lib/forecast.js' "$D/public/index.html" \
+  && ok "index.html has Forecast tab + forecast engine script" || bad "index.html missing forecast wiring"
+grep -q 'function renderForecast' "$D/public/js/app.js" \
+  && grep -q 'invoicesToCashIn' "$D/public/js/app.js" \
+  && grep -q 'fcChartSVG' "$D/public/js/app.js" \
+  && grep -q "fcScnNew" "$D/public/js/app.js" \
+  && grep -q 'renderForecast()' "$D/public/js/app.js" \
+  && ok "app.js renders forecast tab (auto-feed, chart, scenario desk)" || bad "app.js missing forecast wiring"
+grep -q 'dangerzone' "$D/public/css/style.css" \
+  && grep -q 'scn-chip' "$D/public/css/style.css" \
+  && grep -q 'autofed' "$D/public/css/style.css" \
+  && ok "style.css has forecast chart + scenario styles" || bad "style.css missing forecast styles"
 
 echo "--- smoke: $PASS passed, $FAIL failed ---"
 exit $((FAIL>0))

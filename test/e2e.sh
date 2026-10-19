@@ -206,6 +206,57 @@ curl -sf "$BASE/" | grep -q 'id="fEstimate"' && ok "flow15: estimate checkbox se
 curl -sf "$BASE/" | grep -q 'id="taxTable"' && ok "flow15b: tax panel served" || bad "flow15b: tax panel"
 curl -sf "$BASE/" | grep -q 'id="stmtPanel"' && ok "flow15c: statement panel served" || bad "flow15c: statement panel"
 
+# Flow 16: forecast auto-feed journey — unpaid invoice feeds money in, partial payment shrinks it, overdue lands week 0, mark-paid removes it
+node -e "
+const L=require('$D/lib/logic.js'), F=require('$D/lib/forecast.js');
+function isoPlus(d){var x=new Date();x.setDate(x.getDate()+d);return x.toISOString().slice(0,10);}
+let invoices=[];
+const inv={id:'i1',number:L.nextNumber(invoices),clientName:'Forecast Co',clientId:'c1',
+  issueDate:'2026-09-01',dueDate:isoPlus(14),items:[{desc:'Retainer',qty:1,rate:2000}],status:'unpaid',payments:[]};
+invoices.push(inv);
+let fed=F.invoicesToCashIn(invoices,L);
+if(fed.length!==1||fed[0].amount!==2000) throw new Error('auto-feed on save');
+let fc=F.forecast(fed,0,13,{});
+if(fc[2].inflow!==2000) throw new Error('due in 14 days -> week 2, got '+JSON.stringify(fc.map(w=>w.inflow)));
+L.addPayment(inv,500,'2026-10-01');
+fed=F.invoicesToCashIn(invoices,L);
+if(fed[0].amount!==1500) throw new Error('fed amount must follow balance: '+fed[0].amount);
+inv.dueDate=isoPlus(-20); // now overdue
+fed=F.invoicesToCashIn(invoices,L);
+fc=F.forecast(fed,0,13,{});
+if(fc[0].inflow!==1500) throw new Error('overdue should land in week 0');
+inv.status='paid';
+if(F.invoicesToCashIn(invoices,L).length!==0) throw new Error('paid invoice must not feed the forecast');
+" && ok "flow16: forecast auto-feed (save -> week 2, partial pay -> 1500, overdue -> week 0, paid -> gone)" || bad "flow16: forecast auto-feed"
+
+# Flow 17: shortfall alert + recurring bill + what-if scenario shift end to end
+node -e "
+const F=require('$D/lib/forecast.js');
+function isoPlus(d){var x=new Date();x.setDate(x.getDate()+d);return x.toISOString().slice(0,10);}
+const items=[
+  {id:'inv-1',kind:'in',desc:'INV-0001',date:isoPlus(10),amount:1000},
+  {id:'bill-1',kind:'out',desc:'Payroll',date:isoPlus(5),amount:2500,recurring:'monthly'}
+];
+const fc=F.forecast(items,1000,13,{});
+const sf=F.shortfalls(fc,500);
+if(!sf.critical.length) throw new Error('expect a shortfall: balance 1000, payroll 2500 hits week 1');
+if(!sf.critical.some(w=>w.balance<0)) throw new Error('critical weeks must be negative');
+const t=F.totals(fc);
+if(t.totalOut<2500) throw new Error('recurring payroll must total >2500, got '+t.totalOut);
+var sm={'inv-1':2};
+const scn=F.forecast(items,1000,13,sm);
+const d=F.scenarioDiff(fc,scn,500);
+if(d.scnShortfalls<d.baseShortfalls) throw new Error('shifting income later cannot reduce shortfalls');
+const rw=F.runwayWeeks(fc);
+if(!(rw>=0&&rw<=13)) throw new Error('runway '+rw);
+" && ok "flow17: shortfall alert, recurring bill, late-payer scenario, runway" || bad "flow17: shortfall/what-if"
+
+# Flow 18: forecast UI served over HTTP
+curl -sf "$BASE/" | grep -q 'data-tab="forecast"' && ok "flow18: forecast tab served" || bad "flow18: forecast tab"
+curl -sf "$BASE/" | grep -q 'id="fcChart"' && ok "flow18b: forecast chart panel served" || bad "flow18b: forecast chart"
+curl -sf "$BASE/" | grep -q 'id="fcBillAdd"' && ok "flow18c: bill form served" || bad "flow18c: bill form"
+curl -sf "$BASE/lib/forecast.js" | grep -q "invoicesToCashIn" && ok "flow18d: forecast engine served" || bad "flow18d: engine"
+
 kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
 echo "--- e2e: $PASS passed, $FAIL failed ---"
 exit $((FAIL>0))
