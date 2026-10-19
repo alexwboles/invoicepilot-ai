@@ -2,6 +2,14 @@
 (function () {
   'use strict';
   var L = window.InvoicePilot;
+  // Graceful startup: if /lib/logic.js failed to load, show a message instead of a blank page.
+  if (!L) {
+    var m = document.querySelector('main');
+    if (m) m.innerHTML = '<div class="panel"><h2>InvoicePilot could not start</h2>' +
+      '<p class="muted">The shared logic file (/lib/logic.js) failed to load. ' +
+      'Check your connection and reload the page.</p></div>';
+    return;
+  }
   var KEY = 'ip6';
 
   function load() {
@@ -9,7 +17,17 @@
     catch (e) { return blank(); }
   }
   function blank() { return { clients: [], invoices: [], remLog: [], biz: '' }; }
-  function save() { localStorage.setItem(KEY, JSON.stringify(S)); }
+  var storageWarned = false;
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(S)); }
+    catch (e) {
+      // Storage unavailable (private mode, quota, sandboxed iframe): keep working in-memory.
+      if (!storageWarned) {
+        storageWarned = true;
+        if (typeof toast === 'function') toast('Browser storage unavailable — changes will not persist');
+      }
+    }
+  }
   var S = load();
 
   function $(id) { return document.getElementById(id); }
@@ -437,11 +455,29 @@
   $('rInv').addEventListener('change', renderDraft);
   $('copyDraft').addEventListener('click', function () {
     var txt = $('rSubject').textContent + '\n\n' + $('rBody').textContent;
-    navigator.clipboard.writeText(txt).then(function () {
+    if (!$('rBody').dataset.invid) { toast('Nothing to copy yet — pick an overdue invoice first'); return; }
+    function copied() {
       var inv = S.invoices.find(function (x) { return x.id === $('rBody').dataset.invid; });
       if (inv) S.remLog.push({ date: todayStr(), number: inv.number, tone: $('rBody').dataset.tone, client: inv.clientName });
       save(); renderReminders(); toast('Draft copied — paste into your email');
-    }, function () { toast('Copy failed — select the text manually'); });
+    }
+    function failed() { toast('Copy failed — select the text manually'); }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(copied, failed);
+        return;
+      }
+    } catch (e) { /* fall through to the legacy fallback */ }
+    // Fallback for contexts without the async Clipboard API (plain http, sandboxed iframes).
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = txt;
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      if (document.execCommand('copy')) { document.body.removeChild(ta); copied(); return; }
+      document.body.removeChild(ta);
+    } catch (e2) { /* fall through to the failure message */ }
+    failed();
   });
   $('polishDraft').addEventListener('click', function () {
     $('polishNote').textContent = 'Polishing…';
